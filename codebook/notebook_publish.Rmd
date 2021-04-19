@@ -1,0 +1,2117 @@
+---
+title: "Momentary mood and arousal predict real-life prolonged stress"
+author: "Rayyan Tutunji"
+date: "15-04-2021"
+output:
+  html_notebook:
+    number_sections: yes
+    theme: material
+    toc: yes
+    toc_float: 
+        collapsed: true 
+  html_document:
+    fig_height: 6
+    fig_width: 9
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+editor_options:
+  chunk_output_type: inline
+---
+
+
+# Introduction
+
+This analysis notebook accompanies the paper **Momentary mood and arousal predict real-life prolonged stress** by Tutunji et al. 2021, and utilizes data from the study "Stress Reslience and the Brain in Medical Students (STRAIN-MD)". Study design details can be fined in the [original article](paste link after publication), but a brief summary is provided here to assist in analysis comprehension. In this study, participants completed two weeks of Ecological Momentary Asessments (EMA/ESM) coupled with Ecological Physiological Assessments (EPA). One of these weeks culminated in a high-stakes exam, while the other was outside of examination periods thus providing a stress and control week respectively. EMA consisted of questions regarding subjective stress, and positive and negative affect. EPA within the context of this study consisted of a [wearable device](https://www.empatica.com/research/e4/) that collected continuous measures of physiological arousal. Using these measures, we first validate our stress exposure by examining changes in subjective stress ratings between the two week. We then demonstrate the impact of stress exposure on mood and arousal measures. We then explore our findings by looking at continuous associations between subjective stress and outcomes. Finally, we demonstrate the feasibility of Mood and EPA measures in prediction of stress and control weeks using machine learning models. 
+
+All custom functions and code can be found in [associated GitHub directory](https://github.com/raytut/Paper_PredictingStress). Libraries used are listed below.
+
+```{r message=FALSE, warning=FALSE}
+
+# Libraries to import and clean data
+library(readxl)
+library (tidyverse)
+library(plyr)
+library(broom)
+library (hablar)
+library(janitor)
+library(data.table)
+library(zoo)
+library(scales) # Rescaling made easy
+
+# Library for EMA
+library (remotes)
+#remotes::install_github("wviechtb/esmpack") # commented, needs to be installed from github
+library(esmpack)
+library(boot) 
+
+# Basic Stats
+library (psych)
+library (psycho)
+library(Hmisc)
+library(RcmdrMisc)
+library(corrr)
+library(ppcor)
+
+# Mixed Model 
+library (lmerTest)
+library(optimx) # Optimizer for lm 
+library(olsrr) # Diagnostic for lmer
+library(jtools) # Uses summ function for readable models that look pretty
+library(sjPlot) # more modeling display
+library(effectsize) # Get effect sizes from tstat
+library(r2glmm) # Compute effect size directly
+library(gamm4) # Alternative model fitting
+library(performance)
+    
+# Parallel processing
+library(future)
+library(doSNOW)
+library(randomForest)
+
+#Plotting
+library(ggplot2) # Standard plotting
+library(ggpubr)
+library(knitr)
+
+#PCA
+library(factoextra)
+
+#Fonts and Pretty things
+library(stargazer)
+library(extrafont)
+
+#font_import()
+loadfonts(device="pdf")
+```
+
+In addition to the libraries, we also used prespecified themes for ggplots that make some plots easier to draw.
+```{r}
+# Theme 1
+ggtheme <- theme (text=element_text(size=16,  family="Cambria"),
+                  legend.position = "none",
+                  axis.text.y = element_blank(),axis.text.x = element_text(size=16),
+                  axis.ticks.y = element_blank(),
+                  plot.title = element_text(size=16, hjust=0.5),
+                  panel.background = element_rect(fill="transparent"),
+                  panel.grid.minor.y = element_line(size=3),
+                  panel.grid.major = element_line(colour = "aliceblue") )
+# Theme 2
+ptheme <- theme(text=element_text(size=11,  family="Calibri"), 
+          axis.line = element_line(size = 1, colour = "grey"),
+          panel.background = element_rect(fill="transparent"),
+    plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+        panel.grid.minor.y = element_line(colour="grey95"),
+        panel.grid.major.y = element_line(colour = "grey95")) 
+  
+# Set number of cores
+NoCores <- as.numeric(availableCores())-1
+  
+```
+
+Before starting, we also load the custom functions written for the study that are found in the GitHub directory.
+```{r}
+source("functions.R")
+```
+
+
+# Data
+
+
+We first load in the descriptive file here, and perform some cleaning to make the file more human friendly. The descriptive information is stored in a different file than the EMA information to avoid linking the any potential identifying information to the actual data. This section is redacted from the public documentation for this reason.
+
+```{r}
+# Redacted
+```
+
+Using python, we derived physiological arousal features in 10-minute time windows prior to each EMA survey from the raw EPA wristwatch data for each participant. Preprocessing is done through python with the [pyphysio package](https://github.com/MPBA/pyphysio) which has some tools for processing bio-signals. EMA data is not processed during this phase and the raw output from the surveys is loaded into R. Among other things, the EMA and EPA signals contain the following features:
+
+- Event Related Stress
+- Activity Related Stress
+- Physical Stress
+- Social Stress
+- Mood (Positive and Negative)
+- Heart rate (High/Low Frequency, RMSSD, IBI...)
+- Skin Conductance (Phasic, Tonic, Magnitude...)
+- Skin Temperature (Slope, Mean)
+- Accelorometer Data (delta ACC, mean X,Y,Z direction)
+
+
+Due to privacy issues, only a specific file (and not the full file) with anonymized categorical variables for the program are provided in this code. All data presented can be used for replication of the findings. Generated variables include different suffixes, which each represent an alternative mode of calculating summary statistics. Below is a description of what each suffix stands for:
+
+- c:  Variable is subject mean centered
+- z:  Variable is z-transformed at the population level (centered and scaled)
+- s:  Variable is Z-transformed and re-scaled to 1-10 for analysis with different model families
+- m:  Variable mean in each week for each subject 
+- mz: Variable mean from above is z-transformed
+- l:  Variable is Temporally Lagged (-1)
+- cs: Variable is subject centered, then re-scaled to 1-10
+
+Below is the anonymized data frame used for the analysis:
+```{r}
+#EMA_Data <- read.csv("data/EMA_Clean_Anon.csv")
+print(EMA_Pub)
+```
+
+
+# Descriptives Stats
+
+Before running any stats, we should take a look at some descriptive stats to get an overall feel of our data. We do this in two parts, looking at the population descriptives, and then the physiology descriptives.
+
+## Compliance Rates  {.tabset}
+
+Lets first check compliance rates to see how well our subjects adhered to the sampling scheme. We first check the compliance rates uncorrected for the time at which they were acquired, followed by correction of the time limits. We set this to 1 hour since we only have 6 surveys, and our subjects had varying time schedules.
+
+### Uncorrected Compliance {-}
+Compliance rates uncorrected for time off-sets
+```{r EMA Data: Check compliance}
+# Recod compliance variable
+EMA_Data$completed[EMA_Data$survey_progress==100] <- 1 
+# Per subject
+calc.nomiss(completed, castor_record_id, data=EMA_Data, prop=T)
+# more summary statistics for compliance
+summary(calc.nomiss(completed, castor_record_id, data=EMA_Data, prop=TRUE))
+```
+
+Without correcting for time offsets, our EMA measures seem to be nice. Lets see if I correct for timing if it makes a difference next what will happen. We will give participant one hour to finish the survey. If they don't finish it in that time window, we will count it as missing.
+
+### Corrected Compliance {-}
+Compliance rates correcting for time of completion.  first drop any survey that is not complete more than 80%. I then create a variable that tells as when the survey was completed in terms of time (not date). I then conditionally set the completion variable to zero if the survey does not fall within the completed time window given the beep. 
+```{r EMA Data: Check Compliance while account for Time}
+
+# Set up some stuff for replace and refill
+EMA_Data$survey_completed_on <- as.character(EMA_Data$survey_completed_on)
+EMA_Data$survey_completed_time <- as.ITime(EMA_Data$survey_completed_on)
+EMA_Data$completed[EMA_Data$survey_progress < 80] <- 0 
+
+# Replace and refill conditionals for completion, factoring times
+EMA_Data$completed[EMA_Data$survey_completed_time >= (as.ITime("10:30:00")) & EMA_Data$ema_beep==1] <- 0
+EMA_Data$completed[EMA_Data$survey_completed_time >= (as.ITime("13:00:00")) & EMA_Data$ema_beep==2] <- 0
+EMA_Data$completed[EMA_Data$survey_completed_time >= (as.ITime("15:30:00")) & EMA_Data$ema_beep==3] <- 0
+EMA_Data$completed[EMA_Data$survey_completed_time >= (as.ITime("18:00:00")) & EMA_Data$ema_beep==4] <- 0
+EMA_Data$completed[EMA_Data$survey_completed_time >= (as.ITime("20:30:00")) & EMA_Data$ema_beep==5] <- 0
+EMA_Data$completed[EMA_Data$survey_completed_time >= (as.ITime("23:00:00")) & EMA_Data$ema_beep==6] <- 0
+
+# Reformat 0 to Nan, and get new completion rates
+EMA_Data$completed[EMA_Data$completed == 0] <- NA
+calc.nomiss(completed, castor_record_id, data=EMA_Data,prop=TRUE)
+summary(calc.nomiss(completed, castor_record_id, data=EMA_Data,prop=TRUE))
+```
+
+### Usable Physiology {-}
+```{r}
+summary(calc.nomiss(sc_tonic_mean, castor_record_id, data=EMA_Data,prop=TRUE))
+```
+
+When we correct for the timing, we actually still have decent completion rates. Finally we filter out all incomplete surveys and those outside our time windows for our overall analysis. 
+```{r}
+EMA_Data <- EMA_Data %>% dplyr::filter(!is.na(completed)) 
+```
+
+
+## Populations Descriptives {.tabset}
+
+We next take a look at population descriptive that we would like to report.
+
+### Sex {-}
+```{r}
+describe(EMA_descr$Sex)
+```
+### Contraceptive Use {-}
+This is interesting for other analyses we want to do with other data
+```{r}
+describe(factor(EMA_descr$Contraceptive_use))
+```
+### Program {-}
+```{r}
+describe((EMA_descr$Program))
+```
+### First Week {-}
+```{r}
+describe(EMA_descr$First_Week)
+```
+### Days Between Weeks {-}
+```{r}
+# Number of days between weeks
+summary(abs(EMA_descr$Column1))
+```
+
+### Survey Disruption {-}
+Asking whether the surveys disrupted the participants.
+```{r}
+psych::describe(EMA_Data$physical_disruption)
+ggplot(EMA_Data, aes(x=physical_disruption)) + geom_histogram(bins = 7)
+```
+
+
+## Physiology Descriptive {.tabset}
+
+After getting the population descriptive, we should next derive some E4 Quality measures. A lot of the data which is poor quality is already removed early on in the preprocessing pipeline. Instead we can check how many recordings were captured for the IBI data, and the overall movement during testing.
+
+### IBI Based Quality {-}
+This is a measure of what duration of time the detected heart beats cover. We see that for the mean is 27% of time with beats detected. 
+```{r}
+ggplot(EMA_Data, aes(x=ibi_based_quality, colour=ibi_based_quality)) + geom_histogram()
+count(EMA_Data$ibi_based_quality > 0.3)
+psych::describe(EMA_Data$ibi_based_quality)
+```
+
+### IBI and ACC {-}
+Next we will check if the IBI quality is related to the ACC data. This gives us a good idea of how much motion is affecting our data. 
+```{r}
+ggplot(EMA_Data, aes(x=ibi_based_quality, y=acc_delta)) + geom_smooth(method="lm", fullrange=F ) + coord_cartesian(ylim = c(0,10), xlim=c(0, 2.5))  + ggtheme + theme(axis.ticks.y=element_line(size=1), axis.text.y = element_text(size=12)) + ylab("ACC Delta") + xlab ("IBI Based Quality")
+```
+
+### IBI Quality and HR SD {-}
+Next, we check if the IBI Quality effects the SD of the HR measures. It looks like it does have an impact, meaning we likely cant use that measure. 
+```{r}
+ggplot(EMA_Data, aes(x=ibi_based_quality, y=hr_sd)) + geom_smooth(method="lm", fullrange=F ) + ggtheme + theme(axis.ticks.y=element_line(size=1), axis.text.y = element_text(size=12)) + ylab("HR SD") + xlab ("IBI Based Quality")
+
+summary(lm(ibi_based_quality ~ hr_sd, data=EMA_Data))
+
+```
+
+### SC and ACC {-}
+Next we will check if the SC signals are related to the ACC. Basically this is just doing exploratory analysis to double check certain things we already. 
+```{r message=FALSE, warning=FALSE}
+
+fig.sc_tonic <- ggplot(EMA_Data, aes(x=sc_tonic_mean, y=acc_delta)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1), axis.text.y = element_text(size=12)) + ylab("ACC Delta") + xlab ("SC Tonic")  
+fig.sc_mag <- ggplot(EMA_Data, aes(x=sc_phasic_mag, y=acc_delta)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1)) + xlab ("SC Mag") 
+
+fig.sc_num <- ggplot(EMA_Data, aes(x=sc_phasic_num, y=acc_delta)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1)) + xlab ("SC Num") 
+
+fig.sc_auc <- ggplot(EMA_Data, aes(x=sc_phasic_auc, y=acc_delta)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1)) +  xlab ("SC AUC") 
+
+fig.sc_dur <- ggplot(EMA_Data, aes(x=sc_phasic_dur, y=acc_delta)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1)) + xlab ("SC Dur")  
+
+fig.temp_mean <- ggplot(EMA_Data, aes(x=physical_excercise_dur, y=acc_delta, colour="red")) + geom_smooth(method="lm") + ggtheme 
+ggarrange(fig.sc_tonic, fig.sc_mag, fig.sc_num, fig.sc_auc, fig.sc_dur, fig.temp_mean)
+
+```
+
+### SC Mag and number {-}
+```{r message=FALSE, warning=FALSE}
+fig.sc_mag <- ggplot(EMA_Data, aes(x=sc_phasic_mag, y=sc_phasic_num)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1)) + xlab ("SC Mag") 
+fig.sc_mag
+```
+
+## Trends in EMA
+We finally plot the graphs of the EMA items over time in each of the weeks for some exploratory analysis.
+```{r message=FALSE, warning=FALSE}
+
+vars.ema <- c( "event_tot_z", "activity_tot_z", "social_tot_z", "physical_tot_z", "mood_positive_z", "mood_negative_z")
+for ( i in vars.ema) {
+    p1 <- ggplot(EMA_Data, aes(y=get(i), x=ema_survey, colour=Week_Type, fill=Week_Type)) + geom_line(stat="summary") + geom_ribbon(stat="summary", alpha=0.3, color=NA) + scale_x_continuous() + ylab(i)
+  print(p1)
+}
+
+```
+
+It looks like we have a bit of a trend in our data. The closer we are to the exams, the more stress people become. We will need to add this to our models to correct for the trend statistically.
+
+## Aggregate Stress {.tabset}
+
+After plotting our variables over all the week, it will be interesting to check the aggregate stress changes, and how each subjects stress reactivity looks like. For this, we make an average dataframe across the weeks, so we can look at the average change in mood. 
+
+```{r Plot: Aggregate and Stress Change, warning=FALSE}
+
+ 
+#Average Stress per Week:
+EMA_avg <- EMA_Data
+# Now I can do some merging
+EMA_avg <- aggregate(EMA_avg, by=list(EMA_avg$castor_record_id, EMA_avg$Week_Type), FUN=mean, na.rm=T, na.warn=F)
+EMA_avg$castor_record_id <- EMA_avg$Group.1
+EMA_avg$Week_Type <- EMA_avg$Group.2
+EMA_avg$Week_Type <- factor(EMA_avg$Week_Type, levels=c('Control','Stress'),
+                     labels=c('Control','Exam'))
+
+# Split the averaged DF to control and stress week
+EMA_avg_exam <- subset(EMA_avg, Week_Type=="Exam") 
+EMA_avg_control <- subset(EMA_avg, Week_Type!="Exam") 
+
+# Merge by week to calculate change
+EMA_avg_wide <-  merge(EMA_avg_exam, EMA_avg_control, by='castor_record_id', suffixes=c('_exam', '_control'))
+
+# Make Aggregated variables 
+EMA_avg_wide$mood_positive <-((EMA_avg_wide$mood_positive_control + EMA_avg_wide$mood_positive_exam)/2)
+EMA_avg_wide$mood_negative <-((EMA_avg_wide$mood_negative_control + EMA_avg_wide$mood_negative_exam)/2)
+EMA_avg_wide$activity_tot <-((EMA_avg_wide$activity_tot_control + EMA_avg_wide$activity_tot_exam)/2)
+EMA_avg_wide$social_tot <-((EMA_avg_wide$social_tot_control + EMA_avg_wide$social_tot_exam)/2)
+EMA_avg_wide$event_tot <-((EMA_avg_wide$event_tot_control + EMA_avg_wide$event_tot_exam)/2)
+EMA_avg_wide$physical_tot <-((EMA_avg_wide$physical_tot_control + EMA_avg_wide$physical_tot_exam)/2)
+
+# Make stress change, and mean centrer it
+EMA_avg_wide$stress_reactivity <- EMA_avg_wide$mean_stress_exam - EMA_avg_wide$mean_stress_control
+EMA_avg_wide$stress_reactivity_c <- EMA_avg_wide$mean_stress_c_exam - EMA_avg_wide$mean_stress_c_control
+EMA_avg_wide$stress_reactivity_z <- scale(EMA_avg_wide$stress_reactivity, center = TRUE, scale = TRUE)
+
+```
+
+
+### Mean Change in Stress {-}
+```{r}
+#Box Plot
+mean_box <- ggplot(EMA_avg, aes(y=mean_stress, x=Week_Type, colour=Week_Type,fill=Week_Type, na.rm = TRUE)) +
+  geom_boxplot(alpha=1/2) + geom_jitter(width=0.1, alpha=1/2)+
+  scale_y_continuous()+ scale_x_discrete()+
+  ggtitle("Stress Levels per Week")+
+  xlab("") + ylab("Aggregated stress measure\n")+ ggtheme
+mean_box #+ coord_fixed(ratio=1)
+```
+
+### Stress Rectivity Heat Plot {-}
+```{r}
+scat_str <- ggplot (EMA_avg_wide, aes(y=stress_reactivity_c, x=0, colour=stress_reactivity_c) ) +
+    geom_jitter( width = 0.7, alpha=0.75, size = 2) + scale_x_continuous()+
+    ggtitle("Individual Stress Reactivity to Exams\n")+ylab("Stress\nReactivity\n")+labs(color = "Stress\nReactivity\n")+
+    theme(text=element_text(size=18,  family="Cambria"),
+        plot.title=element_text (size=20, hjust=0.5),
+        axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank(),
+        axis.text.y = element_text(size=18),axis.title.y=element_text(size=18),
+        panel.background = element_rect(fill="white"),
+        panel.grid.minor.y = element_line(size=3),
+        panel.grid.major = element_line(colour = "aliceblue"))
+scat_str + scale_color_gradient(low="blue", high="red") + coord_fixed(xlim = c(-5,5))
+```
+ 
+  
+
+# Inferential Stats
+
+We can now run the actual statistics. We use mixed effects models to first validate our paradigm by looking at overall changes in our subjective stress measures between the two weeks. We then go one to investigate the effects of the stress exposure (i.e., stress week) on our outcomes of affect and arousal. We finally investigate and explore the moment-to-moment associations between subjective stress and the outcomes, and then further explore these effects with follow-up analyses and a mediation analysis. 
+
+All our models are fit in a maximal approach. We fit fixed effects for all the main effect of interest, with a random slope. We also fit fixed effects with fixed slopes for all the covariates. If a covariate is categorical with fewer than 6 levels, then we only fit fixed effects and no random slopes. Finally, we model subject as the random main random effect. For each model, we test the multiple families and links, and using the AIC and residual fit, we select the best model. In the results below, we present the final selected models for brevity. Models are commented when producing this notebook to simplify the generation of the html file. 
+
+
+## Week vs Week Differences
+
+The first set of analysis look at differences between the stress and control weeks. We model this as a fixed effect, and additionally model covariates as fixed effects for sex, study program, week order, day and time, movement, and exercise. We model fixed slopes for the covariates with multiple levels, and a random slope for the fixed effect of interest.
+
+### Subjective Stress {.tabset }
+
+The first models will look at the subjective stress measures, and how those change between the weeks. Based on these models, we can see that there is a significant overall effect of week type on most of our stress measures, which is great. Our stress induction is working. This means we have higher subjective stress in our stress week, indicating our design is achieving its goal. 
+
+
+#### Event Related Stress {-}
+ 
+```{r}
+# Model
+# glmer.event_week <- lmer(event_tot_s ~ Week_Type +  #Model week
+#     Sex + Program +  # Model sex and program 
+#     First_Week + ema_day*ema_beep_f + # Model day related items
+#     acc_delta +  physical_excercise_dur + acc_delta*physical_excercise_dur + # Model movement
+#     (1+Week_Type|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (0+ema_survey|castor_record_id) + (0+physical_excercise_dur|castor_record_id) + 
+#     (1|castor_record_id:ema_day:ema_beep_f),
+#     data=EMA_Data,
+#     #family=gaussian,
+#     control=lmerControl(calc.derivs = FALSE))
+
+# Model Summary
+model_output(glmer.event_week)
+
+
+```
+
+
+
+#### Activity Related Stress {-}
+```{r}
+# Model
+# glmer.activity_week <- lmer(activity_tot_s ~ Week_Type +  #Model week
+#     Sex + Program +  # Model sex and program 
+#     First_Week + ema_day*ema_beep_f + # Model day related items
+#     acc_delta +  physical_excercise_dur + acc_delta*physical_excercise_dur + # Model movement
+#     (1+Week_Type|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (0+ema_survey|castor_record_id) + (0+physical_excercise_dur|castor_record_id) + 
+#     (1|castor_record_id:ema_day:ema_beep_f),
+#     data=EMA_Data,
+#     #family=gaussian,
+#     control=lmerControl(calc.derivs = FALSE))
+
+# Model Summary
+model_output(glmer.activity_week )
+
+```
+
+
+
+#### Social Stress {-}
+
+```{r}
+# Model
+# glmer.social_week <- glmer( social_tot_s ~ Week_Type +  #Model week
+#     Sex + Program +  # Model sex and program 
+#     First_Week + ema_day*ema_beep_f + # Model day related items
+#     acc_delta +  physical_excercise_dur + acc_delta*physical_excercise_dur + # Model movement
+#     (1+Week_Type|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (0+ema_survey|castor_record_id) + (0+physical_excercise_dur|castor_record_id) + 
+#     (1|castor_record_id:ema_day:ema_beep_f),
+#     data=EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.social_week)
+
+```
+
+
+#### Physical Stress {-}
+
+```{r warning=FALSE}
+# Model
+# glmer.physical_week<- lmer( physical_tot_s ~ Week_Type +  #Model week
+#     Sex + Program +  # Model sex and program 
+#     First_Week + ema_day*ema_beep_f + # Model day related items
+#     acc_delta +  physical_excercise_dur + acc_delta*physical_excercise_dur + # Model movement
+#     (1+Week_Type|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (0+ema_survey|castor_record_id) + (0+physical_excercise_dur|castor_record_id) + 
+#     (1|castor_record_id:ema_day:ema_beep_f),
+#     data=EMA_Data,
+#     #family=Gamma,
+#     control=lmerControl(calc.derivs = FALSE))
+
+# Model Summary
+model_output(glmer.physical_week)
+
+```  
+
+#### Results: Subjective Stress v Week{-}
+We tabulate the results, and produce a regression effect plot to visualize the results. 
+```{r}
+tab_model(glmer.event_week, glmer.activity_week,  glmer.social_week, glmer.physical_week, 
+           terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur"), 
+          dv.labels=c("Event", "Activitiy", "Social", "Physical"), 
+          title="Table 1. Subjective Stress vs Week Type", show.df=T, show.fstat = T,
+          transform=NULL, 
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+
+```{r}
+# Subset the variables we want to plot
+plot.mood_week <- plot_models(glmer.event_week, glmer.activity_week, glmer.social_week, glmer.physical_week)
+rm_term <- as.vector(plot.mood_week$data$term[1:length(plot.mood_week$data$term)])
+rm_term <- rm_term[rm_term != "Week_TypeStress"]
+
+# Make the plot
+plot.mood_week <- plot_models(glmer.event_week, glmer.activity_week, glmer.social_week, glmer.physical_week,
+                                  m.labels=c("Event Stress", "Activity Stress","Social Stress", "Physical Stress" ),
+                                  axis.labels = c(" "),
+                                # Stastistical Stuff
+                                rm.terms = rm_term,
+                                #show.values = T,
+                                #value.size = 4, 
+                                #std.est=T, 
+                                show.p=T,
+                                p.shape=T,
+                                legend.pval.title = "Significance", 
+                                # Visual Stuff
+                                colors="#666666",
+                                dot.size=2,
+                                line.size = 1,
+                                spacing=1 , 
+                                vline.color = "darkgrey", 
+                                legend.title = "") + ylab("\nParameter Estimate (a.u.)") + xlab("Subjective Stress") + 
+                                ptheme + 
+                                theme(axis.ticks.y=element_blank(), 
+                                      legend.text=element_text(size=16), legend.title = element_text(size=16),
+                                      axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                                      panel.grid.major.x = element_line(colour = "grey95"),
+                                      panel.grid.minor.x = element_line(colour = "grey90")) 
+
+# Show and save
+plot.mood_week+ coord_flip(ylim=c(-0.65,0.65)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90"))
+ggsave("figures/fig_WeekResid_SubjectiveStress.tiff",units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+```
+
+
+### Mood {.tabset}
+
+Next, we want to investigate the impact of an examination period on mood. Conceptually, mood is more of an outcome of being stressed than a measure of stress.
+
+#### Positive{-}
+
+```{r warning=FALSE}
+# Model
+# glmer.posmood_week <- glmer( mood_positive_s ~ Week_Type +  #Model week
+#     Sex + Program +  # Model sex and program 
+#     First_Week + ema_day*ema_beep_f + # Model day related items
+#     physical_excercise_dur + acc_delta + acc_delta*physical_excercise_dur + # Model movement
+#     (1+Week_Type|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (0+ema_survey|castor_record_id) + (0+physical_excercise_dur|castor_record_id) + 
+#     (1|castor_record_id:ema_day:ema_beep_f),
+#     data=EMA_Data,
+#     family=gaussian(link="log"),
+#     control=glmerControl(calc.derivs = FALSE))
+
+# Model Summary
+model_output(glmer.posmood_week)
+
+```
+
+####  Negative{-}
+
+```{r warning=FALSE}
+# Model
+# glmer.negmood_week <- glmer( mood_negative_s ~  Week_Type +  #Model week
+#     Sex + Program +  # Model sex and program 
+#     First_Week + ema_day*ema_beep_f + # Model day related items
+#     physical_excercise_dur + acc_delta + acc_delta*physical_excercise_dur + # Model movement
+#     (1+Week_Type|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (0+ema_survey|castor_record_id) + (0+physical_excercise_dur|castor_record_id) + 
+#     (1|castor_record_id:ema_day:ema_beep_f),
+#     data=EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE))
+
+# Model Summary
+model_output(glmer.negmood_week) 
+
+```
+
+#### Results: Mood vs Subjective Stress{-}
+
+```{r}
+tab_model(glmer.posmood_week, glmer.negmood_week,
+          terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur"), 
+          dv.labels=c("Positive", "Negative"), 
+          title="Table 2. Mood vs Week Type", 
+          transform=NULL, 
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+
+
+### Phyisiology Stress
+
+We established changes in subjective stress between the weeks, which has an impact on our mood outcomes. We also want to see if there's a general difference between the physiology variables and the weeks.To do this we apply the same approach for the physiology measures as the other models. We also add measures of skin temperature here however, to make sure that we factor this in. Skin temperature is important as it can be related to sweat or heat, which can also lead to increased arousal. 
+
+#### Skin Conductance {.tabset .tabset-fade}
+
+First we model the skin conductance, controlling for skin temperature and physical exercise.
+
+##### Tonic SC {-} 
+
+```{r warning=TRUE}
+# # Model
+# glmer.sc_ton_mean_week <- glmer( sc_tonic_mean_s ~ Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur + acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f), 
+#     EMA_Pub, 
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.sc_ton_mean_week)
+
+
+```
+
+
+##### Phasic Num {-}
+
+```{r warning=FALSE}
+# Model
+# glmer.sc_ph_num <- glmer( sc_phasic_num ~  Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur + acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f),  
+#     EMA_Data, 
+#     family=poisson(link="log"),
+#     control=lmerControl(calc.derivs = FALSE) )
+
+# Model Summary
+model_output(glmer.sc_ph_num)
+
+```
+
+
+
+##### Phasic Magnitude {-}
+```{r warning=FALSE}
+# Model
+# glmer.sc_ph_mag <- glmer( sc_phasic_mag_s ~ Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur +acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f), 
+#     EMA_Data, 
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Model Summary
+model_output(glmer.sc_ph_mag)
+
+```
+
+
+
+##### Phasic AUC {-}
+
+```{r}
+# Model
+# glmer.sc_ph_auc_week <- glmer( sc_phasic_auc_s  ~ Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur +acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f), 
+#     EMA_Data, 
+#     family=Gamma(link=log),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.sc_ph_auc_week)
+
+``` 
+
+
+#### Heart Rate {.tabset}
+
+Next We check the heart rate data. It again looks like the relationship of the models is not as expected.
+
+##### HR Mean {-}
+
+```{r}
+# Model
+# glmer.hr_mean_week <- glmer( hr_mean_s ~ Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur +acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f), 
+#     EMA_Data, 
+#     family=Gamma(link=identity),
+#    control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.hr_mean_week)
+
+```
+
+
+##### HR Max {-}
+
+```{r}
+# Model
+# glmer.hr_max_week <- glmer( hr_max_s  ~ Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur +acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f),  
+#     EMA_Data, 
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model SUmmary
+model_output(glmer.hr_max_week)
+
+```
+
+
+##### HR Min {-}
+
+```{r}
+# Model
+# glmer.hr_min_week <- glmer( hr_min_s  ~ Week_Type + 
+#     Sex + Program + # Model pop differences
+#     First_Week +  ema_beep_f*ema_day + # Model day related differencxes
+#     physical_excercise_dur +acc_delta + # Modle movement stuff
+#     temp_mean_z + temp_slope_z +  # Model temp effects
+#     (1+Week_Type |castor_record_id) + 
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
+#     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
+#     (1 | castor_record_id:ema_day:ema_beep_f), 
+#     EMA_Data, 
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.hr_min_week)
+
+```
+
+
+
+#### Results: Physiology vs Weektype
+We now present the physiology results in a table, corrected for multiple comparisons with FDR.
+```{r}
+tab_model(glmer.sc_ton_mean_week, glmer.sc_ph_num, glmer.sc_ph_mag, glmer.sc_ph_auc_week, glmer.hr_mean_week, glmer.hr_min_week, glmer.hr_max_week, 
+         terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur", 
+         "temp_mean_z", "temp_slope_z"), 
+          dv.labels=c("Tonic", "Number", "Magnitude", "AUC", "Mean", "Min", "Max"), 
+          title="Table 3. Physio vs Week Type", 
+          transform=NULL, p.adjust="fdr",
+         show.stat=TRUE,
+         show.se=T) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+
+
+### Plot: Week v Outcomes
+Finally, we can plot the estimates for the week differences here, also correcting for multiple comparisons with FDR.
+```{r}
+# Together
+plot.physio <- plot_models(glmer.posmood_week, glmer.sc_ton_mean_week, glmer.sc_ph_num)
+rm_term <- as.vector(plot.physio$data$term[1:97])
+rm_term <- rm_term[rm_term != "Week_TypeStress"]
+# Color list
+col_list <-c('#7570B3','#7570B3','#7570B3',"#D95F02", "#D95F02", '#D95F02', '#D95F02', "#1B9E77", "#1B9E77")
+
+# Make the plot
+plot.all_week_resid <- plot_models( glmer.posmood_week, glmer.negmood_week, 
+            glmer.sc_ton_mean_week, glmer.sc_ph_num, glmer.sc_ph_mag, glmer.sc_ph_auc_week, 
+            glmer.hr_mean_week, glmer.hr_min_week, glmer.hr_max_week,
+            m.labels=c("Positive Affect", "Negative Affect", "SC Tonic", "SC Number", "SC Magnitued", "SC AUC","HR Mean", "HR Minimum", "HR Maximum"),
+            axis.labels = c(" "),
+            # Stastistical Stuff
+            rm.terms = rm_term,
+            #show.values = T,
+            #value.size = 4, 
+            #std.est=T, 
+            show.p=T,
+            p.shape=T,
+            p.adjust = "fdr", 
+            legend.pval.title = "Significance", 
+            # Visual Stuff
+            colors=col_list,
+            dot.size=2,
+            line.size = 1,
+            spacing=0.7, 
+            vline.color = "darkgrey", 
+            legend.title = "") + 
+            ptheme + 
+            theme(axis.ticks.y=element_blank(), 
+                  legend.text=element_text(size=16), legend.title = element_text(size=16),
+                  axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                  panel.grid.major.x = element_line(colour = "grey95"),
+                  panel.grid.minor.x = element_line(colour = "grey90")) 
+
+# Plot and save
+plot.all_week_resid + coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90"))
+ggsave("figures/fig_WeekResid_ALL.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+```
+
+
+
+## Momentary Associations
+
+We saw lower physiological arousal in the exam week, which was unexpected. We also see lower positive arousal. So it could be that the effects we see are actually driven by our positive arousal/mood. To check this, and to also check whether we can replicate findings on moment-to-moment associations between subjective stress and physiological arousal and mood, we discard week type, and look at the measure continuously. 
+
+In this models, we use a fixed slope due to convergence issues. We initially tried changing optimizers, which did not result in better convergence, so we simplified the model by doing a fixed slope for our fixed effect of interest. We again use more or less the same covariates as before, except for program, and for day. We keep the time variable in there to control for circadian rhythms. Additionally, we see there is a correlation between our subjective stress measures, so we need to factor this effect in by modeling interaction terms as well. 
+
+```{r}
+ rcorr(as.matrix(EMA_Data[,c("event_tot_s", "activity_tot_s", "social_tot_s", "physical_tot_s")]))
+```
+
+### Mood {.tabset}
+
+First we check the moment-to-moment associations between positive affect and subjective stress. These confirm that momentary subjective stress is also associated with reduced positive affect, and increased negative affect.
+
+#### Positive {-}
+```{r}
+
+# glmer.posmood_beep <- lmer(mood_positive_s ~ 
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#    # family=gaussian(link="identity"),
+#     control=lmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.posmood_beep )
+
+```
+
+#### Negative {-}
+
+```{r}
+# glmer.negmood_beep <- glmer(mood_negative_s ~ 
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.negmood_beep)
+```
+
+#### Tabulated Models{-}
+```{r}
+tab_model(glmer.posmood_beep, glmer.negmood_beep,
+         # terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur"), 
+          title="Table 3. HR vs Week Type", 
+          transform=NULL, p.adjust = "fdr",
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+
+
+### Skin conductance {.tabset}
+
+We next model the skin conductance vs. the stress measures. We expect that in this analysis, we see an expected increase in arousal linked to subjective stress. We do indeed confirm this below. 
+
+#### Tonic Mean {-}
+
+```{r}
+# Model
+# glmer.sc_ton_ema <- glmer(sc_tonic_mean_s ~ 
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.sc_ton_ema)
+```
+
+
+#### Phasic Number {-}
+```{r}
+# Model
+# glmer.sc_ph_num_ema <- glmer(sc_phasic_num  ~ 
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=poisson(link="sqrt"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Model Summary
+model_output(glmer.sc_ph_num_ema)
+```
+
+
+#### Phasic Magnitude {-}
+
+```{r}
+# Model
+# glmer.sc_ph_mag_ema <- glmer(sc_phasic_mag_s   ~
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.sc_ph_mag_ema)
+```
+
+
+#### Phasic AUC {-}
+
+```{r}
+# Model
+# glmer.sc_ph_auc_ema <- glmer(sc_phasic_auc_s  ~
+#      event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Model Summary
+model_output(glmer.sc_ph_auc_ema)
+```
+
+
+### Heart Rate{.tabset}
+
+Finally, we also take a look at subjective stress associations with subjective stress. Here we do not see any striking relationships. 
+
+#### Mean {-}
+
+```{r}
+# Model
+# glmer.hr_mean_ema <- glmer(hr_mean_s ~
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="identity"),
+#    control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
+
+# Model Summary
+model_output(glmer.hr_mean_ema)
+```
+
+
+#### Min {-}
+
+```{r}
+# Model
+# glmer.hr_min_ema <- glmer(hr_min_s  ~
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Model Summary
+model_output(glmer.hr_min_ema)
+```
+
+
+#### Max {-}
+
+```{r}
+# Model
+# glmer.hr_max_ema <- glmer(hr_max_s ~
+#     event_tot_s*activity_tot_s + activity_tot_s*social_tot_s + physical_tot_s +
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex +  physical_excercise_dur + acc_delta +
+#     temp_mean_z + temp_slope_z + 
+#     (0+event_tot_s+activity_tot_s+social_tot_s+physical_tot_s | castor_record_id) + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Model Summary
+model_output(glmer.hr_max_ema)
+
+```
+
+
+
+### Table: Subjective Stress and Outcomes
+
+```{r}
+tab_model(glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
+            glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema, 
+          dv.labels=c("SC Tonic", "SC Number", "SC Magnitude", "SC AUC", "Mean", "Min", "Max"), 
+          title="Table X. Momentary Physiology and Subjective Stress",
+            transform=NULL, p.adjust="fdr", 
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+### Plot: Outcomes v Subjective Stress
+
+Next I want to plot our outcomes as a function of the subjective stress. I will do this in separate graphs for event, activity, social, and physical stress. This gets a little complicated though. So I will make each graph separately, and then combine them outside of R to make sure they still look good. 
+```{r}
+# Shorrtlist the variables to those of interest
+plot.vars <- plot_models(glmer.posmood_beep, glmer.sc_ph_num_ema, glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema)
+# Get and filter terms
+full_term <- as.vector(plot.vars$data$term[1:length(plot.vars$data$term)])
+event_term <- full_term[full_term != "event_tot_s"]
+activ_term <-full_term[full_term != "activity_tot_s"]
+soc_term <- full_term[full_term != "social_tot_s"]
+phy_term <- full_term[full_term != "physical_tot_s"]
+# Set the colours
+col_list <-c('#7570B3','#7570B3','#7570B3',"#D95F02", "#D95F02", '#D95F02', '#D95F02', "#1B9E77", "#1B9E77")
+
+# Event Plot
+plot.event_substr <- plot_models(glmer.posmood_beep, glmer.negmood_beep, 
+            glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
+            glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema, 
+            m.labels=c("Positive Affect", "Negative Affect", "SC Tonic", "SC Number", "SC Magnitued", "SC AUC", "HR Mean", "HR Minimum", "HR Maximum"),
+            axis.labels = c(""), 
+            # Stastistical Stuff
+            rm.terms = event_term,
+            #show.values = T,
+            #value.size = 4, 
+            #std.est=T, 
+            show.p=T,
+            p.shape=T,
+            p.adjust = "fdr", 
+            legend.pval.title = "Significance", 
+            # Visual Stuff
+            colors=col_list,
+            dot.size=2,
+            line.size = 0.5,
+            spacing=0.7, 
+            vline.color = "darkgrey", 
+            legend.title = "") + 
+            ptheme + 
+            theme(axis.ticks.y=element_blank(), 
+                  axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                  panel.grid.major.x = element_line(colour = "grey95"),
+                  panel.grid.minor.x = element_line(colour = "grey90")) 
+plot.event_substr <- plot.event_substr+ coord_flip(ylim=c(0.75,1.25)) +  coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
+ggsave("figures/fig_StrResid_Event.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+
+# Act Plot
+plot.activity_substr <-  plot_models(glmer.posmood_beep, glmer.negmood_beep, 
+            glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
+            glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema, 
+            m.labels=c("Positive Affect", "Negative Affect", "SC Tonic", "SC Number", "SC Magnitued", "SC AUC", "HR Mean", "HR Minimum", "HR Maximum"),
+            axis.labels = c(""), 
+            # Stastistical Stuff
+            rm.terms = activ_term,
+            #show.values = T,
+            #value.size = 4, 
+            #std.est=T, 
+            show.p=T,
+            p.shape=T,
+            p.adjust = "fdr", 
+            legend.pval.title = "Significance", 
+            # Visual Stuff
+            colors=col_list,
+            dot.size=2,
+            line.size = 0.5,
+            spacing=0.7, 
+            vline.color = "darkgrey", 
+            legend.title = "") + 
+            ptheme + 
+              theme(axis.ticks.y=element_blank(), 
+                  axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                  panel.grid.major.x = element_line(colour = "grey95"),
+                  panel.grid.minor.x = element_line(colour = "grey90")) 
+plot.activity_substr <- plot.activity_substr+ coord_flip(ylim=c(0.75,1.25)) +  coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
+ggsave("figures/fig_StrResid_Activity.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+
+
+# Social Stress
+plot.social_substr <-  plot_models(glmer.posmood_beep, glmer.negmood_beep, 
+            glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
+            glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema, 
+            m.labels=c("Positive Affect", "Negative Affect", "SC Tonic", "SC Number", "SC Magnitued", "SC AUC", "HR Mean", "HR Minimum", "HR Maximum"),
+            axis.labels = c(""), 
+            # Stastistical Stuff
+            rm.terms = soc_term,
+            #show.values = T,
+            #value.size = 4, 
+            #std.est=T, 
+            show.p=T,
+            p.shape=T,
+            p.adjust = "fdr", 
+            legend.pval.title = "Significance", 
+            # Visual Stuff
+            colors=col_list,
+            dot.size=2,
+            line.size = 0.5,
+            spacing=0.7, 
+            vline.color = "darkgrey", 
+            legend.title = "") + 
+            ptheme + 
+            theme(axis.ticks.y=element_blank(), 
+                  axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                  panel.grid.major.x = element_line(colour = "grey95"),
+                  panel.grid.minor.x = element_line(colour = "grey90")) 
+## Plot
+plot.social_substr <- plot.social_substr + coord_flip(ylim=c(0.75,1.25)) +  coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
+ggsave("figures/fig_StrResid_Social.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+
+# Physical Stress
+plot.physical_substr <- plot_models(glmer.posmood_beep, glmer.negmood_beep, 
+            glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
+            glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema, 
+            m.labels=c("Positive Affect", "Negative Affect", "SC Tonic", "SC Number", "SC Magnitued", "SC AUC", "HR Mean", "HR Minimum", "HR Maximum"),
+            axis.labels = c(""), 
+            # Stastistical Stuff
+            rm.terms = phy_term,
+            #show.values = T,
+            #value.size = 4, 
+            #std.est=T, 
+            show.p=T,
+            p.shape=T,
+            p.adjust = "fdr", 
+            legend.pval.title = "Significance", 
+            # Visual Stuff
+            colors=col_list,
+            dot.size=2,
+            line.size =0.5,
+            spacing=0.7, 
+            vline.color = "darkgrey", 
+            legend.title = "") + 
+            ptheme + 
+              theme(axis.ticks.y=element_blank(), 
+                  axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                  panel.grid.major.x = element_line(colour = "grey95"),
+                  panel.grid.minor.x = element_line(colour = "grey90")) 
+# Plot
+plot.physical_substr <- plot.physical_substr +  coord_flip(ylim=c(-0.5,0.5), xlim=c(1,1.1)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
+ggsave("figures/fig_StrResid_Physical.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+
+# All
+ggarrange(plot.event_substr, plot.activity_substr, plot.social_substr, plot.physical_substr, common.legend = T, legend="right")
+ggsave("figures/fig_StrResid_MAT.tiff", units="in", width=7, height=7, dpi=300, compression = 'lzw', bg="transparent")
+```
+
+## Mood and Physio
+
+Since we think this is an arousal related mechanism, we would also need to establish the link to physiology. To this end, we check the relationship between physiology and the mood items. We see a high correlation between positive and negative mood (presented below). So we also model interaction terms here. Due to model convergence issues, we only model the fixed intercepts here for the fixe effects of interest. Again, we check all model families before we pick the one with the best fit. 
+
+```{r}
+ rcorr(as.matrix(EMA_Data[,c("mood_positive_s", "mood_negative_s")]))
+```
+
+### Skin Conductance {.tabset}
+
+#### Mean {-}
+```{r}
+# Model
+# glmer.sc_ton_mood <- glmer(sc_tonic_mean_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (0+mood_positive_s*mood_negative_s| castor_record_id) +# + (1+mood_negative_s|castor_record_id)+
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.sc_ton_mood)
+
+```
+
+#### Number {-}
+```{r}
+# Model
+# glmer.sc_phnum_mood <- glmer(sc_phasic_num_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (1+mood_positive_s*mood_negative_s| castor_record_id) +# + (1+mood_negative_s|castor_record_id)+
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.sc_phnum_mood)
+```
+
+#### Magnitude {-}
+```{r}
+# Model
+# glmer.sc_ph_mag_mood <- glmer(sc_phasic_mag_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + 
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (1+mood_positive_s*mood_negative_s| castor_record_id)  + 
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#    family=Gamma(link="identity"),
+#     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000) ))
+
+# Summary
+model_output(glmer.sc_ph_mag_mood)
+```
+
+
+#### AUC {-}
+```{r}
+# Model
+# glmer.sc_ph_auc_mood <- glmer(sc_phasic_auc_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + 
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (1+mood_positive_s*mood_negative_s| castor_record_id)  +
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.sc_ph_auc_mood)
+```
+
+#### Tabulated Models {-}
+```{r}
+tab_model(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.sc_ph_mag_mood, glmer.sc_ph_auc_mood, 
+          dv.labels=c("Tonic", "Number", "Magnitude", "AUC"), 
+          title="Table X. SCR and Mood",
+            transform=NULL, p.adjust = "fdr",
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+
+### Heart Rate {.tabset}
+
+#### Mean {-}
+```{r}
+
+# glmer.hr_mean_mood <- glmer(hr_mean_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (1+mood_positive_s*mood_negative_s| castor_record_id)  + # (1+mood_positive_s| castor_record_id) + (1+mood_negative_s|castor_record_id)+
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.hr_mean_mood )
+
+```
+
+
+#### Min {-}
+```{r}
+# glmer.hr_min_mood <- glmer(hr_min_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (1+mood_positive_s*mood_negative_s| castor_record_id)  + # (1+mood_positive_s| castor_record_id) + (1+mood_negative_s|castor_record_id)+
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#     control=glmerControl(calc.derivs = FALSE) )
+
+# Summary
+model_output(glmer.hr_min_mood )
+
+```
+
+#### Max {-}
+```{r}
+# glmer.hr_max_mood <- glmer(hr_max_s ~ mood_positive_s*mood_negative_s + 
+#     ema_beep + # I will model the beep to factor circadian rhythms
+#     Sex + temp_slope_z + temp_mean_z + 
+#     acc_delta + physical_excercise_dur +
+#     (1+mood_positive_s*mood_negative_s| castor_record_id)  + # (1+mood_positive_s| castor_record_id) + (1+mood_negative_s|castor_record_id)+
+#     (0+ema_beep|castor_record_id)+
+#     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id)+
+#     (0+acc_delta|castor_record_id) + (0+physical_excercise_dur|castor_record_id),
+#     EMA_Data,
+#     family=Gamma(link="log"),
+#    control=glmerControl(calc.derivs = FALSE, #, optimizer="Nelder_Mead",
+#                          optCtrl=list(maxfun=100000)) )
+
+# Summary
+model_output(glmer.hr_max_mood )
+```
+
+#### Table: HR v Mood {-}
+```{r}
+tab_model(glmer.hr_mean_mood, glmer.hr_min_mood, glmer.hr_max_mood, 
+          dv.labels=c("Mean", "Min", "Max"), 
+          title="Table X. Heart rate vs. Mood",
+            transform=NULL, p.adjust="fdr", 
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+
+### Table: Physio v Mood
+```{r}
+tab_model(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.sc_ph_mag_mood, glmer.sc_ph_auc_mood,
+                glmer.hr_mean_mood, glmer.hr_min_mood, glmer.hr_max_mood,
+          dv.labels=c("SC Tonic", "SC Number", "SC Magnitude", "SC AUC", "HR Mean", "HR Min", "HR Max"), 
+          title="Table X. Physio vs. Mood",
+            transform=NULL, p.adjust="fdr", 
+         show.stat=TRUE,
+         show.se=TRUE) %>%  
+    return() %$%
+    knitr %>%
+    asis_output()
+```
+
+### Plot: Physio v Mood
+```{r}
+# Subset variables of interests
+plot.physio <- plot_models(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.hr_mean_mood)
+rm_term <- as.vector(plot.physio$data$term[1:97])
+rm_term <- rm_term[rm_term != "mood_positive_s" & rm_term!="mood_negative_s"]
+# Set the colours
+col_list <-c('#7570B3','#7570B3','#7570B3',"#D95F02", "#D95F02", '#D95F02', '#D95F02', "#1B9E77", "#1B9E77")
+
+
+# Make the plot
+plot.pos_mood_resid <- plot_models( glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.sc_ph_mag_mood, glmer.sc_ph_auc_mood,
+                glmer.hr_mean_mood, glmer.hr_min_mood, glmer.hr_max_mood,
+              m.labels=c("SC Tonic", "SC Number", "SC Magnitued", "SC AUC","HR Mean", "HR Minimum", "HR Maximum"),
+           axis.labels = c(" "),
+            # Stastistical Stuff
+           transform=NULL,
+            rm.terms = rm_term,
+            #show.values = T,
+            #value.size = 4, 
+            #std.est=T, 
+            show.p=T,
+            p.shape=T,
+            p.adjust = "fdr", 
+            legend.pval.title = "Significance", 
+            # Visual Stuff
+            colors=col_list,
+            dot.size=2,
+            line.size = 1,
+            spacing=0.7, 
+            vline.color = "darkgrey", 
+            legend.title = "") + 
+            ptheme + scale_y_continuous(breaks=c( -0.2, -.1,0, .1,.2)) + 
+            theme(axis.ticks.y=element_blank(), 
+                  axis.title = element_text(size=16),axis.text.x=element_text(size=11),
+                  panel.grid.major.x = element_line(colour = "grey95"),
+                  panel.grid.minor.x = element_line(colour = "grey90")) 
+# Plot and Save
+plot.pos_mood_resid + coord_flip(ylim=c(-.25,.25)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90"))
+ggsave("figures/fig_MoodkResid_ALL.tiff", units="in", width=5, height=5, dpi=300, compression = 'lzw', bg="transparent")
+```
+
+
+## Mediation anaylsis
+
+In the stress week, we see a decrease in both positive mood and physiology. However, we also see an increase in stress, which we know is related to some physiology (specifically, SC magnitude). So we need to actually confirm that what we see in the stress week (i.e. the physiology arousal decrease) is actually due to the positive mood changes. To this end, we perfrom a mediation analysis. We first need to filter out the nan's here for some reason though, and we cant really add any covariates in an easy way. So we will stick to the simplest model here. 
+
+```{r}
+library(mediation)
+set.seed(123)
+
+EMA_Sub <- EMA_Data %>% dplyr::select(castor_record_id, week_type, sc_phasic_mag_s, sc_phasic_num_s, mood_positive_s, event_tot_s,  Sex, Program, # Model pop differences
+    First_Week,  ema_beep_f, ema_day, 
+    physical_excercise_dur, acc_delta, 
+    temp_mean_z,temp_slope_z) %>% filter(complete.cases(.))
+```
+
+
+### Mediate Number
+First we checke whether positive mood mediates the effects of week type of the number of responses
+```{r}
+# Main effect
+fit.totaleffect=glmer(sc_phasic_num_s ~ week_type + (1|castor_record_id), EMA_Sub)
+summ(fit.totaleffect)
+
+# Mediations
+fit.mediator=glmer(mood_positive_s ~ week_type + (1|castor_record_id), EMA_Sub)
+summ(fit.mediator)
+
+# Combined
+fit.dv=glmer(sc_phasic_num_s ~ week_type*mood_positive_s + (1|castor_record_id), EMA_Sub)
+summ(fit.dv)
+
+# Mediation analysis
+results1 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='week_type', mediator='mood_positive_s', boot=F, sims=5000)
+summary(results1)
+
+```
+
+### Mediate Magnitude
+Then we check the mediation effects on the magnitude of the SC responses.
+```{r}
+# Main effect
+fit.totaleffect=glmer(sc_phasic_mag_s ~ week_type  + (1|castor_record_id), EMA_Sub)
+summ(fit.totaleffect)
+
+# Mediations
+fit.mediator=glmer(mood_positive_s ~ week_type  +  (1|castor_record_id), EMA_Sub)
+summ(fit.mediator)
+
+# Combined
+fit.dv=glmer(sc_phasic_mag_s ~ week_type*mood_positive_s + (1|castor_record_id), EMA_Sub)
+summ(fit.dv)
+
+# Mediation analysis
+results2 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='week_type', mediator='mood_positive_s', boot=F, sims=5000)
+summary(results2)
+
+```
+
+The results show that indeed, the results are mediated by positive mood in the stress week.
+
+# Random Forests
+
+We were able to establish that physiology and mood both change in the weeks under chronic stress. That is good, because now we can see how well we can use this informaiton in predictive models. To this end, we use the randomForest package plus some extra functions to test our prediction. Firrst lets set a seed and load a packacge for these analyses. 
+
+```{r}
+library(randomForest)
+set.seed(123)
+```
+
+## OOB Error {.tabset}
+Before going into the details of the models, we first subset the data to omit any nans. We then check the out of back error for random forest models predicting week from the data types. We run three models predicting week type from each of the following:
+
+1. Affect
+2. Physiology
+3. Combination
+
+After checking the OOB errors, we can split the data into the training/testing sets.
+```{r}
+# Variables for Forest
+vars.forest <- c( "Week_Type", "mood_positive", "mood_negative", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+vars.forest.physio <-c( "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "Week_Type" )
+
+# Subset the data
+df.RandomForest <- EMA_Data[,vars.forest]
+df.RandomForest <- na.omit(df.RandomForest)
+df.RandomForest.physio <- df.RandomForest[,vars.forest.physio]
+``` 
+
+### Mood {-}
+This modle classifies week type from the affect items
+```{r}
+# Run random forest model for mood vars
+forest.mood <- randomForest(Week_Type ~ mood_positive + mood_negative,
+                            data=df.RandomForest, 
+                            ntree=5000,
+                          importance = TRUE)
+forest.mood
+```
+
+### Physio {-}
+Now we can check what the physio data looks like. The OOB is 38.43 for the mood data. Can we do better with the full data? And what is the most important variable in these models?
+```{r}
+# Run random forest full model
+vars.forest.physio <- c( "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+forest.full <- randomForest( as.formula(paste("Week_Type", "~", (paste(vars.forest.physio, collapse="+")))) ,
+                            data=df.RandomForest, 
+                            ntree=5000,
+                            importance = TRUE)
+forest.full
+randomForest::importance(forest.full)
+```
+
+
+### Full {-}
+
+Next up we check the entire data set and see if using both is good. 
+```{r}
+# Run the forest with most important features
+forest.important <- randomForest(Week_Type ~ .,
+                            data=df.RandomForest, 
+                            ntree=5000,
+                            importance = TRUE)
+forest.important
+```
+
+
+Ok so first I looked at the random forest models as a whole without really doing any type of validation of the predictions. We can see that if we look at the mood, we get better predictions for stress and control weeks than looking at the whole set of physio parameters. Thats interesting, but unsurprising. We now need to do some testing and validation. 
+
+## LOBO
+
+In order to the validation, we try out a leave-one-beep-out (LOBO) analysis. This analysis will run a random forest model for each subject separately, leaving out one survey when running the model. We then test the model on the beep that was left out. We repeat this process for the subject until we've removed each survey/beep out once. This results in a series of predictions that give us an error level for each subject. In order to do this, we have developed a function that is provided in this github directory.
+
+### Model 1: Mood {-}
+
+
+#### Model {-}
+We first run the LOBO model using the custom function.
+```{r}
+# Then with the full model
+vars.forest.mood <-  c("mood_positive_c", "mood_negative_c")
+forest.lobo.mood <- rf.lobo(Data=EMA_Data,
+                              SubNr="castor_record_id",
+                           xvars=vars.forest.mood,
+                              yvar="Week_Type",
+                              NoTree=5000)
+as.data.frame(forest.lobo.mood$total$subject_errors)
+psych::describe(forest.lobo.mood$total$subject_errors)
+
+```
+
+
+
+#### Bootstrap{-}
+We see we get an estimated error of around 33% for this model. Thats cool. Now we need to test it against the random error. One can assume in theory that the prediction error for a dichotomous variable is 50/50, but we dont like to do things the easy way. Instead, we will do 10000 iterations where we bootstrap resample the stress and control weeks. This will give us the real error rate with a sampling distribution. This was made into a function, but for some reason I couldnt get the function to run in parallel. So instead I run the parallel processing of the bootstrap outside of a function. Its not pretty, but it works. 
+```{r warning=FALSE}
+# BootstrapLOBO.
+# { cl <- makeCluster(NoCores-1)
+# registerDoSNOW(cl)
+# iterations <- 10000
+# print("Running, this will take a while...", quote=F)
+# pb <- txtProgressBar(max = iterations, style = 3)
+# progress <- function(n) setTxtProgressBar(pb, n)
+# opts <- list(progress = progress)
+# forest.boot.mood <- foreach(i=1:iterations, .options.snow = opts ) %dopar% {
+#     rf.BootstrapError(Data=EMA_Data,
+#                           Shuffle="Week_Type",
+#                           Iterations=1,
+#                           SubjectId="castor_record_id",
+#                           xvar=vars.forest.mood,
+#                           yvar="Week_Type",
+#                           Trees=500)
+# }
+# print("Done!", quote=F)
+# stopCluster(cl)
+# # Now merge them into one dataframe
+# pb <- txtProgressBar(max =length(forest.boot.mood), style = 3)
+# forest.boot.mood.merge <- as.data.frame(forest.boot.mood[[1]][2])
+# for (i in 2:length(forest.boot.mood)) {
+#     setTxtProgressBar(pb, i)
+#     df.2merge <- as.data.frame(forest.boot.mood[[i]][2])
+#     forest.boot.mood.merge <- merge (df.2merge, forest.boot.mood.merge , by="DataFrame.id")
+# }
+# # After merging the results into a single data frame, lets also everage the error rate
+# forest.boot.mood.merge$averageError <- rowMeans(forest.boot.mood.merge [, -which(names( forest.boot.mood.merge) %in% c("DataFrame.id"))], na.rm=T)
+# saveRDS(forest.boot.mood.merge, file = "data/bootstrap_mood.rds")
+# }
+``` 
+
+
+Now that we have run the bootstrap, we also save it just in case, and then we get the average error, and calcualte the true SD and SE from the sampling distribution. 
+```{r}
+# Print the Errors
+boot.mood.descr <- psych::describe(forest.boot.mood.merge$averageError)
+# Also get the true SD of bootstraps
+boot.mood.descr$sd <- mean((psych::describe(forest.boot.mood.merge))$sd, na.rm=T)
+boot.mood.descr$se <- mean((psych::describe(forest.boot.mood.merge))$se, na.rm=T)
+boot.mood.descr
+
+```
+
+ 
+#### Stouffer's Test{-}
+We will now test the LOBO model using Mood against the bootstrapped LOBO model with the same variables. We made a function to do this. The function estimates the p-value by comparing it to the permuation test distribution. The function also has the option to estimate the p-value from an assumed normal distribution, but we simply use the actual distribution for this. We additionally compute a combined p-value with this function using Stoufferś method and the poolr package Using this method, we see the LOBO models perfrom significantly better than chance. Yay! So within-subject approach works super well! 
+
+```{r}
+
+lobo.mood_null <- rf.null_test(forest.lobo.mood, forest.boot.mood.merge, model_type="LOBO", method="actual")
+lobo.mood_null
+```
+
+
+
+
+### Model 2: Physio {-}
+
+The second model I will test is whether we can predict week type from the physiology data alone. For this, I run the model first to get the LOBO error rate.
+
+#### Model {-}
+We see that it does a bit worse than model 1. But we still need to check the bootstrap error for the model with the physio data. It should be similar to that of the mood though.
+```{r}
+# Then with the full model
+vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+forest.lobo.physio <- rf.lobo(Data=EMA_Data,
+                              SubNr="castor_record_id",
+                              xvars=vars.forest.physio,
+                              yvar="Week_Type",
+                              NoTree=5000)
+as.data.frame(forest.lobo.physio$total$subject_errors)
+psych::describe(forest.lobo.physio$total$subject_errors)
+
+```
+
+#### Bootstrap{-}
+We again do the bootstrap model, and then save it as an object for later use. 
+```{r}
+# # LOBO Bootstrapping
+# { cl <- makeCluster(NoCores-1)
+#     registerDoSNOW(cl)
+#     iterations <- 10000
+#     print("Running, this will take a while...", quote=F)
+#     pb <- txtProgressBar(max = iterations, style = 3)
+#     progress <- function(n) setTxtProgressBar(pb, n)
+#     opts <- list(progress = progress)
+#     forest.boot.physio <- foreach(i=1:iterations, .options.snow = opts ) %dopar% {
+#         rf.BootstrapError(Data=EMA_Data,
+#                                           Shuffle="Week_Type",
+#                                           Iterations=1,
+#                                           SubjectId="castor_record_id",
+#                                           xvar=vars.forest.physio,
+#                                           yvar="Week_Type",
+#                                           Trees=500)
+#     }
+#     print("Done!", quote=F)
+#     stopCluster(cl)
+#     
+#     # Now merge them into one dataframe
+#     pb <- txtProgressBar(max =length(forest.boot.physio), style = 3)
+#     forest.boot.physio.merge <- as.data.frame(forest.boot.physio[[1]][2])
+#     for (i in 2:length(forest.boot.physio)) {
+#         setTxtProgressBar(pb, i)
+#         df.2merge <- as.data.frame(forest.boot.physio[[i]][2])
+#         forest.boot.physio.merge <- merge(df.2merge, forest.boot.physio.merge , by="DataFrame.id",
+#                                           suffixes=c((paste(i,".x")),(paste(i,".y"))))
+#     }
+#     # Merge it to mean
+#     forest.boot.physio.merge$averageError <- rowMeans(forest.boot.physio.merge [, -which(names( forest.boot.physio.merge) %in% c("DataFrame.id"))], na.rm=T)
+#     saveRDS( forest.boot.physio.merge, file = "data/bootstrap_physio.rds")
+# }
+```
+
+We now calculate the bootstrap SE and SD
+```{r}
+# Print the Errors
+boot.physio.descr <- psych::describe(forest.boot.physio.merge$averageError)
+# Also get the true SD of bootstraps
+boot.physio.descr$sd <- mean((psych::describe(forest.boot.physio.merge))$sd, na.rm=T)
+boot.physio.descr$se <- mean((psych::describe(forest.boot.physio.merge))$se, na.rm=T)
+boot.physio.descr
+```
+
+#### Stouffer's Test{-}
+
+So now that I have the averaged bootstrap error for the physio model, lets check if the LOBO is more than random with a test against the bootstrap estimates. 
+```{r}
+lobo.physio_null <- rf.null_test(forest.lobo.physio, forest.boot.physio.merge,  model_type="LOBO", method="actual")
+lobo.physio_null
+
+```
+
+According to the t-test against the bootstrap error sample, the test is above chance level here too. I will again do a model comparison at the end of the model-testing sections.
+
+### Model 3: Full {-}
+
+Finally we check the full model using both physio and mood variables.
+
+#### Model{-}
+```{r}
+# Then with the full model
+vars.forest.x <-  c("mood_positive_c", "mood_negative_c", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "temp_mean")
+forest.lobo.full <- rf.lobo(Data=EMA_Data,
+                              SubNr="castor_record_id",
+                              xvars=vars.forest.x,
+                              yvar="Week_Type",
+                              NoTree=5000)
+as.data.frame(forest.lobo.full$total$subject_errors)
+psych::describe(forest.lobo.full$total$subject_errors)
+
+``` 
+
+
+#### Bootstrap{-}
+Then I can check the bootstrap error for the model combined model as done before:
+```{r}
+# {cl <- makeCluster(NoCores-1)
+# registerDoSNOW(cl)
+# iterations <- 10000
+# print("Running, this will take a while...", quote=F)
+# pb <- txtProgressBar(max = iterations, style = 3)
+# progress <- function(n) setTxtProgressBar(pb, n)
+# opts <- list(progress = progress)
+# forest.boot.combi <- foreach(i=1:iterations, .options.snow = opts ) %dopar% {
+#     rf.BootstrapError(Data=EMA_Data,
+#                                       Shuffle="Week_Type",
+#                                       Iterations=1,
+#                                       SubjectId="castor_record_id",
+#                                       xvar=vars.forest.x,
+#                                       yvar="Week_Type",
+#                                       Trees=500)
+# }
+# print("Done!", quote=F)
+# stopCluster(cl)
+# 
+# # Now merge them into one dataframe
+# pb <- txtProgressBar(max =length(forest.boot.combi), style = 3)
+# forest.boot.combi.merge <- as.data.frame(forest.boot.physio[[1]][2])
+# for (i in 2:length(forest.boot.combi)) {
+#     setTxtProgressBar(pb, i)
+#     df.2merge <- as.data.frame(forest.boot.combi[[i]][2])
+#     forest.boot.combi.merge <- merge(df.2merge, forest.boot.combi.merge , by="DataFrame.id",
+#                                       suffixes=c((paste(i,".x")),(paste(i,".y"))))
+# }
+# # Merge it to mean
+# forest.boot.combi.merge$averageError <- rowMeans(forest.boot.combi.merge [, -which(names( forest.boot.combi.merge) %in% c("DataFrame.id"))], na.rm=T)
+#  saveRDS( forest.boot.combi.merge, file = "data/bootstrap_combi.rds")
+# }
+```
+
+We then again calculate the SE and SD of the models
+```{r}
+# Print the Errors
+boot.combi.descr <- psych::describe(forest.boot.combi.merge$averageError)
+# Also get the true SD of bootstraps
+boot.combi.descr$sd <- mean((psych::describe(forest.boot.combi.merge))$sd, na.rm=T)
+boot.combi.descr$se <- mean((psych::describe(forest.boot.combi.merge))$se, na.rm=T)
+boot.combi.descr
+
+```
+
+#### Stouffer's Test{-}
+And finally I can test the difference between the full model and the bootstrapped one. So we can see again, that our model only improves slightly with the addition of the physio variables (1%). That doesnt seem great. But we can also guess that within the control week there may be times when people are stressed, and vice versa for the stress week.We will do the null test again.
+
+```{r}
+lobo.combi_null <- rf.null_test(forest.lobo.full, forest.boot.combi.merge, model_type="LOBO", method="actual")
+lobo.combi_null
+```
+
+
+
+### Whats the best LOBO? {-}
+
+Now that we've established all our models do better than the bootstrap version, we can also test the models against each other. We first check the lowest performers. 
+
+#### Mood vs Physio
+
+We filter the data and have to do a couple of manipulations to do a paired t-test.We see that the mood does significantly better
+
+```{r}
+
+rf.result.df1 <- as.data.frame(forest.lobo.physio$total$subject_errors)
+colnames(rf.result.df1)[1] <- "physio"
+rf.result.df1$id <- rownames(rf.result.df1)
+
+rf.result.df2 <- as.data.frame(forest.lobo.mood$total$subject_errors)
+colnames(rf.result.df2)[1] <- "mood"
+rf.result.df2$id <- rownames(rf.result.df2)
+
+rf.result.merge <- merge(rf.result.df1, rf.result.df2, by="id")
+tidy(t.test(x=rf.result.merge$physio, y=rf.result.merge$mood, paired=T))
+```
+
+
+#### Combi vs Mood
+
+Now I test the mood vs full model. It appears that the full model does a lot better than the one with mood only. So it is safe to say that Model 3 > Model 1 > Model 2
+```{r}
+
+rf.result.df1 <- as.data.frame(forest.lobo.full$total$subject_errors)
+colnames(rf.result.df1)[1] <- "full"
+rf.result.df1$id <- rownames(rf.result.df1)
+
+rf.result.df2 <- as.data.frame(forest.lobo.mood$total$subject_errors)
+colnames(rf.result.df2)[1] <- "mood"
+rf.result.df2$id <- rownames(rf.result.df2)
+
+rf.result.merge <- merge(rf.result.df1, rf.result.df2, by="id")
+tidy(t.test(x=rf.result.merge$full, y=rf.result.merge$mood, paired=T))
+```
+
+
+
+
+## LOSO
+
+Next up is the standard LOSO. The idea here is that we want to check if we can actually use the data of different participants to predict for a completetly new one. This will remove the enitre EMA data set of a single subject, run the model, then cross validate it with the subject that was left out. I can now run the function below, first with a vector only including the mood items, then the full model:
+
+### Model 1: Mood {-}
+
+#### Model{-}
+Our first model looks at the mood ratings predicting which week participants are in. I estimate the LOSO error rates below. The model here doesnt do as well as the model with the lobo. Lets try to use the LOBO null distribution to see if its above chance levels next.
+```{r}
+# First with mood items
+vars.forest.mood <-  c("mood_positive", "mood_negative")
+forest.loso.mood <- rf.loso(Data=EMA_Data, 
+                       SubNr="castor_record_id", 
+                       xvars=vars.forest.mood,
+                       yvar="Week_Type",
+                       NoTree=5000)
+as.data.frame(forest.loso.mood$error_rate)
+psych::describe(forest.loso.mood$error_rate*100, na.rm=T)
+
+```
+
+#### Test {-}
+Here I will try to check the LOSO model vs. the null distribution estimated from the bootstrap we did earler. The loso model did not perform better than the bootstrapped estimates.
+```{r}
+
+forest.loso_mood_null <- rf.null_test(forest.loso.mood, forest.boot.mood.merge,  model_type="LOSO", method="actual")
+forest.loso_mood_null
+
+```
+
+
+### Model 2: Physio {-}
+
+The second model is looking at the physio variables predicting week type. We see that it only achieves 47.83% success. We will test this now against the bootstrapped error rate.
+#### Model{-}
+```{r}
+# Then with the full model
+vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+forest.loso.physio <- rf.loso(Data=EMA_Data, 
+                       SubNr="castor_record_id", 
+                       xvars=vars.forest.physio,
+                       yvar="Week_Type",
+                       NoTree=5000)
+as.data.frame(forest.loso.physio$error_rate)
+psych::describe(forest.loso.physio$error_rate*100)
+``` 
+
+#### Test{-}
+Next we check the physio variables against the null distribution. Here we see that it its also not signficantly better than chance.
+```{r}
+forest.loso_physio_null <- rf.null_test(forest.loso.physio, forest.boot.physio.merge, model_type="LOSO", method="actual")
+forest.loso_physio_null
+```
+
+### Model 3: Full {-}
+FInally, the third model looks at everything (i.e. both physio and mood). This has an error rate of 43% which still sucks. Lets test this next against the bootstrap error
+#### Model {-}
+```{r}
+# Then with the full model
+vars.forest.x <-  c("mood_positive_c", "mood_negative_c",  "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+forest.loso.full <- rf.loso(Data=EMA_Data, 
+                       SubNr="castor_record_id", 
+                       xvars=vars.forest.x,
+                       yvar="Week_Type",
+                       NoTree=5000)
+as.data.frame(forest.loso.full$error_rate)
+psych::describe(forest.loso.full$error_rate*100)
+
+``` 
+#### Test {-}
+Finally we test the model with both against the null distribution.This one is also not significantly better than chance.  
+```{r}
+forest.loso_full_null <- rf.null_test(forest.loso.full, forest.boot.combi.merge, model_type="LOSO", method="actual")
+forest.loso_full_null
+
+```
+
+Based on all three tests for the models against the null we can conclude that the LOSO models do not in fact perform better than chance. 
+
+### Whats the best LOSO? {-}
+
+Based on the error rate, lets see if one model does a better job than the other:
+```{r}
+rf.loso.mood <- as.data.frame(forest.loso.mood$error_rate)
+rf.loso.mood$id <- rownames(rf.loso.mood)
+
+rf.loso.physio <- as.data.frame(forest.loso.physio$error_rate)
+rf.loso.physio$id <- rownames(rf.loso.physio)
+
+rf.loso.full <- as.data.frame(forest.loso.full$error_rate)
+rf.loso.full$id <- rownames(rf.loso.full)
+
+rf.result.merge <- merge(rf.loso.mood, rf.loso.physio, by="id")
+rf.result.merge <- merge(rf.result.merge, rf.loso.full, by="id")
+
+tidy(t.test(x=rf.result.merge$`forest.loso.mood$error_rate`, y=rf.result.merge$`forest.loso.physio$error_rate`, paired=T))
+tidy(t.test(x=rf.result.merge$`forest.loso.mood$error_rate`, y=rf.result.merge$`forest.loso.full$error_rate`, paired=T))
+tidy(t.test(x=rf.result.merge$`forest.loso.physio$error_rate`, y=rf.result.merge$`forest.loso.full$error_rate`, paired=T))
+```
+
+It looks like there is no significant difference between the error rates in the paired sample t-test in these three models. What could this mean? That regardless of what model we use at a population level, we still are not able to make decent predictions. I think that these models arent good at population level predictions, and this is pretty obnvious if we look at the within-subject variance from our linear models. Most of the variance comes from between subjects. Another approach is warranted.
+
+
+## Plot of Models
+
+We next waht to make a plot of my models with the standard error. We first merge them into one dataframe, then we can actually plot them. 
+```{r}
+
+# I will rename the bootstrap coloumns so I can add them to the full model dataframe for plotting
+df_boot1 <- forest.boot.mood.merge[,c("DataFrame.id" ,"averageError")]
+df_boot1 <- df_boot1 %>% dplyr::rename(id=DataFrame.id, error=averageError) 
+df_boot1 <- tibble::add_column(df_boot1, model="boot.mood", .after="id")
+df_boot2 <- forest.boot.physio.merge %>% dplyr::select(DataFrame.id, averageError) %>% dplyr::rename(id=DataFrame.id, error=averageError) 
+df_boot2 <- tibble::add_column(df_boot2, model="boot.physio", .after="id")
+df_boot3 <- forest.boot.combi.merge %>% dplyr::select(DataFrame.id, averageError) %>% dplyr::rename(id=DataFrame.id, error=averageError) 
+df_boot3 <- tibble::add_column(df_boot3, model="boot.full", .after="id")
+# Join the boot straps
+df_boot <- full_join(df_boot1, df_boot2) 
+df_boot <- full_join(df_boot, df_boot3)
+# Make the results and merge boot
+df_loo <- gather(rf.combined.errors,model, error, loso.mood:lobo.full, factor_key=TRUE)
+df_loo <- full_join(df_loo, df_boot)
+# Separate coloumns for plotting
+df_loo <- separate(df_loo, model, into=c("Method", "Model"))
+
+
+
+df_loo_sum <- data_summary(df_loo, "error", c("Method", "Model"))
+# Set the SD and SE of bootstrap models to the correct ones of whole model
+df_loo_sum$sd[df_loo_sum$Method=="boot" & df_loo_sum$Model=="mood"] <- boot.mood.descr$sd
+df_loo_sum$se[df_loo_sum$Method=="boot" & df_loo_sum$Model=="mood"] <- boot.mood.descr$se
+df_loo_sum$sd[df_loo_sum$Method=="boot" & df_loo_sum$Model=="physio"] <- boot.physio.descr$sd
+df_loo_sum$se[df_loo_sum$Method=="boot" & df_loo_sum$Model=="physio"] <- boot.physio.descr$se
+df_loo_sum$sd[df_loo_sum$Method=="boot" & df_loo_sum$Model=="full"] <- boot.combi.descr$sd
+df_loo_sum$se[df_loo_sum$Method=="boot" & df_loo_sum$Model=="full"] <- boot.combi.descr$se
+
+# Set the factor to make it pretty
+df_loo_sum$Method <- factor(df_loo_sum$Method, levels =c("lobo", "loso", "boot"), labels = c("LOBO", "LOSO", "Bootstrap"))
+df_loo_sum$Model<- factor(df_loo_sum$Model, levels =c("mood", "physio", "full"), labels = c("Model 1:\nMood", "Model 2:\n Physiology", "Model 3:\nCombination"))
+
+figure.loo <- ggplot(df_loo_sum, aes(x=Model, y=error, colour=Method, fill=Method)) +
+    geom_bar(stat="summary", position = position_dodge2()) + 
+    geom_errorbar(aes(ymin=error-se, ymax=error+se), width=.2, position=position_dodge(.9), colour="black")  + 
+    scale_y_continuous(breaks=c(0,10,20,30,40,50, 60, 70, 80), minor_breaks=c(5,15,25,35,45,55,65,75, 85) )+ 
+    scale_colour_brewer(palette="Set2") + scale_fill_brewer(palette="Set2") + 
+    xlab("")+ ylab("Error Rate (%)\n") + 
+    theme(text=element_text(size=16,  family="Calibri"), 
+          axis.line = element_line(size = 1, colour = "grey"),
+          panel.background = element_rect(fill="transparent"),
+        panel.grid.minor.y = element_line(colour="grey95"),
+        panel.grid.major.y = element_line(colour = "grey95")); 
+#ggsave("figures/fig_RFModels.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw')
+figure.loo
+```
+
+## Testing All Models
+
+Now we want to see for each of the models, which one performs best. I first need to split the long dataframe I made for the figures into a wide format.
+```{r}
+df_loo_wide <- pivot_wider(df_loo,id_cols = id, names_from=c(Method, Model), values_from=error)
+print(df_loo_wide)
+write_csv(df_loo_wide, file = "data/LOO_DF.csv")
+```
+
+
+### Model 1: Mood {.tabset}
+
+#### LOBO vs Boot {-}
+```{r}
+tidy(t.test(df_loo_wide$lobo_mood, df_loo_wide$boot_mood , paired = T))
+
+```
+
+#### LOSO vs Boot {-}
+
+```{r}
+tidy(t.test(df_loo_wide$loso_mood, df_loo_wide$boot_mood , paired = T))
+
+```
+
+#### LOBO  vs LOSO {-}
+```{r}
+
+tidy(t.test(df_loo_wide$lobo_mood, df_loo_wide$loso_mood , paired = T))
+```
+
+
+### Model 2: Physio {.tabset}
+
+#### LOBO vs Boot {-}
+```{r}
+
+tidy(t.test(df_loo_wide$lobo_physio, df_loo_wide$boot_physio , paired = T))
+
+```
+
+#### LOSO vs Boot {-}
+
+```{r}
+
+tidy(t.test(df_loo_wide$loso_physio, df_loo_wide$boot_physio , paired = T))
+
+```
+
+
+#### LOBO  vs LOSO {-}
+```{r}
+
+tidy(t.test(df_loo_wide$lobo_physio, df_loo_wide$loso_physio , paired = T))
+
+```
+
+
+
+### Model 3: Full Model {.tabset}
+
+#### LOBO vs Boot {-}
+```{r}
+
+tidy(t.test(df_loo_wide$lobo_full, df_loo_wide$boot_full , paired = T))
+
+```
+
+#### LOSO vs Boot {-}
+
+```{r}
+
+tidy(t.test(df_loo_wide$loso_full, df_loo_wide$boot_full , paired = T))
+
+```
+
+
+#### LOBO  vs LOSO {-}
+```{r}
+
+tidy(t.test(df_loo_wide$lobo_full, df_loo_wide$loso_full , paired = T))
+
+```
+
+
+
