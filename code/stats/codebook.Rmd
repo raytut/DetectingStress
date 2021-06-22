@@ -127,9 +127,378 @@ source("functions.R")
 
 We first load in the descriptive file here, and perform some cleaning to make the file more human friendly. The descriptive information is stored in a different file than the EMA information to avoid linking the any potential identifying information to the actual data. This section is redacted from the public documentation for this reason.
 
+# Data
+
+
+We first load in the descriptive file here, and perfrom some cleaning to make the file more human friendly. The descriptive information is stored in a different file than the EMA information to avoid linking the any potential identifying information to the actual data. This section is redacted from the public documentation for this reason.
+
 ```{r}
-# Redacted
+# Get descritpive stats
+EMA_descr <- read.delim("data/descriptives.txt")
+
+# Cleanup
+EMA_descr$castor_record_id <- EMA_descr$Subject_ID
+EMA_descr$Sex[EMA_descr$Contraceptive_use=="Male"] <- "Male"
+EMA_descr$Sex[EMA_descr$Contraceptive_use!="Male"] <- "Female"
+# Recode weeks and first scan as factor
+EMA_descr$First_Week[EMA_descr$Column1 > 0] <- "Exam-First"
+EMA_descr$First_Week[EMA_descr$Column1 < 0] <- "Control-First"
+
+# Recode first scan
+EMA_descr$First_Scan_Num <- EMA_descr$First_Scan
+EMA_descr$First_Scan[EMA_descr$First_Scan_Num < 0] <- "Stress-First"
+EMA_descr$First_Scan[EMA_descr$First_Scan_Num > 0] <- "Control-First"
+
 ```
+
+Using python, we derived physiological features in 10-minute time windows prior to each EMA survey from the raw EPA data for each participant. Preprocessing is done through python with the [pyphysio package](https://github.com/MPBA/pyphysio) which has some tools for processing biosignals. EMA data is not processed during this phase and the raw output from the surveys is loaded into R. Among other things, the EMA and EPA signals contain the following features:
+
+- Event Related Stress
+- Activity Related Stress
+- Physical Stress
+- Social Stress
+- Mood (Positive and Negative)
+- Heart rate (High/Low Frequencey, RMSSD, IBI...)
+- Skin Conductance (Phasic, Tonic, Magnitude...)
+- Skin Temperature (Slope, Mean)
+- Accelorometer Data (delta ACC, mean X,Y,Z direction)
+
+
+We then load this file, and recode some variables and perfrom some specific cleaning steps. 
+```{r EMA Data Import}
+
+# Read Data
+EMA_Data <- read.csv("data/EMA_Clean_Features_10min.csv") 
+
+# Precleaning
+#First change types incase of improper input
+EMA_Data %>% retype
+
+# Some precleaning for variable generations
+EMA_Data$obs <- as.numeric(EMA_Data$survey_package_name)
+EMA_Data <- separate(EMA_Data, 'survey_package_name', c('ema_day','ema_beep'), sep = -1, remove=F)
+EMA_Data$ema_beep_f <- as.factor(EMA_Data$ema_beep)
+EMA_Data$ema_beep <- as.numeric(EMA_Data$ema_beep)
+EMA_Data$ema_day <- as.factor(EMA_Data$ema_day)
+EMA_Data$ema_day_num <- as.numeric(EMA_Data$ema_day)
+EMA_Data$Sub_nr_week <-  with(EMA_Data, interaction(castor_record_id, week_type))
+EMA_Data$ema_survey <- as.numeric(EMA_Data$survey_package_name)
+
+# Merge with descriptive and remove dropouts from both dataframes
+EMA_Data <- merge(EMA_Data, EMA_descr, by='castor_record_id')
+EMA_Data <- filter(EMA_Data, EMA_Data$Wave != 0)
+EMA_descr <- filter(EMA_descr, EMA_descr$Wave != 0)
+EMA_Data$First_Week <- as.factor(EMA_Data$First_Week)
+# Keep only distict
+EMA_Data <- EMA_Data %>% distinct(Sub_nr_week, obs, .keep_all=T)
+
+EMA_Data$week_type <- EMA_Data$week_type-1
+EMA_Data$Week_Type <- factor(EMA_Data$week_type, levels=c('0','1'),
+                         labels=c('Control','Stress'))
+```
+
+
+## Scoring variables
+
+Before analyzing the data, still need to do some processing to standardize the variables to fit them to mixed models. As such, we process the questionnaire data and the EPA data below.
+
+### EMA Variables {.tabset}
+
+For each of the EMA scales, we transform some of the items, rescaled them, and then sum them. This varries for each catrogory of quesitons. 
+
+#### Positive Affect {-}
+Positive affect is on of our outcome measures. For positive affect (PA), we first rescale the variables from -3 to 3 into 1-7. The sums of the score is overall reported PA. 
+```{r echo=TRUE}
+
+## Positive: Rescale from -3-3 to 1 -7
+EMA_Data$ema_happy <- (EMA_Data$ema_happy+4)
+EMA_Data$ema_relax <- (EMA_Data$ema_relax+4)
+EMA_Data$ema_cheer <- (EMA_Data$ema_cheer+4)
+EMA_Data$ema_satisfied <- (EMA_Data$ema_satisfied+4)
+#Total
+EMA_Data$mood_positive <- rowSums(EMA_Data[,c("ema_happy","ema_relax","ema_cheer", "ema_satisfied")])
+
+```
+
+#### Negative Affect {-}
+Simialr to PA, we do the same here for negative affect. We rescale the individual items, sum for total.
+```{r echo=TRUE}
+## Negative: Rescale
+EMA_Data$ema_down <- (EMA_Data$ema_down+4)
+EMA_Data$ema_guilty <-(EMA_Data$ema_guilty+4)
+EMA_Data$ema_insecure <- (EMA_Data$ema_insecure+4)
+EMA_Data$ema_lonely <- (EMA_Data$ema_lonely+4)
+EMA_Data$ema_anxious <- (EMA_Data$ema_anxious+4)
+# Total: Sum of measures
+EMA_Data$mood_negative <- rowSums(EMA_Data[,c("ema_down","ema_guilty","ema_insecure","ema_lonely","ema_anxious")])
+
+```
+
+#### Event Stress {-}
+
+Event related stress questions relate to most prominent event since last beep. For the items ranking the pleasantness, controlability, and expectedness, we need to reverse the score so that less positive events contribute more to the total. It is also scaled -3 to 3, with higher score being better.I will reverse scale the items. So if an event is more pleasant, the event stress score goes down for example. Event importance is just rescaled to 1-7.
+```{r echo=TRUE}
+# Reverse scale the pleasantness
+ EMA_Data$event_pleasant <- (EMA_Data$event_pleasant+4)
+EMA_Data$event_pleasant <- (8-EMA_Data$event_pleasant)
+EMA_Data$event_pleasant <- (EMA_Data$event_pleasant-4)
+# Importance rescaled 1-7
+EMA_Data$event_importance <- (EMA_Data$event_importance+4)
+# Reverse score Controlability
+EMA_Data$event_control <- (EMA_Data$event_control+4)
+EMA_Data$event_control <- (8-EMA_Data$event_control)
+EMA_Data$event_control <- (EMA_Data$event_control-4)
+# Reverse score Expectedness
+EMA_Data$event_expect<-(EMA_Data$event_expect+4)
+EMA_Data$event_expect<-(8-EMA_Data$event_expect)
+EMA_Data$event_expect<-(EMA_Data$event_expect-4)
+# Sum for Total
+EMA_Data$event_tot <- rowSums(EMA_Data[,c ("event_pleasant","event_importance","event_control","event_expect")])
+
+```
+
+#### Activtiy Stress {-}
+Activity related stress retains to the activity participants are currently doing right before the beep. The skilled and preference measure are also reversed. More skilled=Lower score. Same with preference. 
+```{r echo=TRUE}
+# Rever Skillfullness
+EMA_Data$activity_skill<-(EMA_Data$activity_skill+4)
+EMA_Data$activity_skill<-(8-EMA_Data$activity_skill)
+EMA_Data$activity_skill<-(EMA_Data$activity_skill-4) 
+# Rescaled preference 1-7
+EMA_Data$activity_preference<-(EMA_Data$activity_preference+4)
+# Rescaled preference 1-7
+EMA_Data$activity_effort<-(EMA_Data$activity_effort+4)
+# Sum for total
+EMA_Data$activity_tot<-rowSums(EMA_Data[,c("activity_skill", "activity_preference", "activity_effort")])
+```
+
+#### Social Stress {-}
+
+Social stress items relate to the social situation participants are in. There are two branches: Either you are alone, or you are with someone. Both these branches will contribute to the total score. Some measures are reveresed, and some are just brought into the positive. We again get the sum score, ignoring the NaNs since questions are dependant on branch.
+```{r echo=TRUE}
+# Rescale if they want to be alone or with someone 1-7
+EMA_Data$social_alone<-(EMA_Data$social_alone +4)
+EMA_Data$social_with <- (EMA_Data$social_with+4)
+# Reverse the pleasantness scale
+EMA_Data$social_pleasant <- (EMA_Data$social_pleasant + 4)
+EMA_Data$social_pleasant <- (8-EMA_Data$social_pleasant)
+# Reverse the at ease scale
+EMA_Data$social_ease<- (EMA_Data$social_ease + 4)
+EMA_Data$social_ease<- (8-EMA_Data$social_ease)
+# Reverse the self scale
+EMA_Data$social_self<- (EMA_Data$social_self + 4)
+EMA_Data$social_self<- (8-EMA_Data$social_self)
+# Reverse the at ease alone scale
+EMA_Data$social_alone_ease<-(EMA_Data$social_alone_ease +4)
+EMA_Data$social_alone_ease<- (8-EMA_Data$social_alone_ease)
+#Total. Make sure that nans are not dropped because in the event they are alone, the social items are different
+EMA_Data$social_tot<-rowSums(EMA_Data[,c ("social_alone","social_with","social_pleasant","social_ease", "social_self", "social_alone_ease")], na.rm=TRUE)
+
+```
+
+#### Physical Stress {-}
+
+Items relate to physical experiences of discomfort. These are control items. We do similar steps as before. We bring to scores from (-3 > 3) to (1 > 7) scaling, and get a sum score. We then just get the sum score for this. In this section we also rescale the excercise items which we use as covariates later
+```{r echo=TRUE}
+#First recode
+EMA_Data$physical_tired<-(4+EMA_Data$physical_tired)
+EMA_Data$physical_well<-(4+EMA_Data$physical_well)
+EMA_Data$physical_pain<- (4+EMA_Data$physical_pain)
+EMA_Data$physical_hunger<- (4+EMA_Data$physical_hunger)
+EMA_Data$physical_temp<- (4+EMA_Data$physical_temp)
+#Total
+EMA_Data$physical_tot<-rowSums(EMA_Data[,c("physical_tired","physical_well","physical_pain", "physical_hunger","physical_temp")])
+
+# Also while Im here I do the excercise Items
+EMA_Data$event_duration[is.na(EMA_Data$event_duration)] <- 0
+EMA_Data$physical_excercise_dur <-((EMA_Data$event_duration))/max(EMA_Data$event_duration)
+```
+
+#### Center, scale, and lag {-}
+
+Next we center the variables, rescale them, and also lag them (temporal lagging -1). This is done as a loop for each of the summed items. 
+```{r}
+# Variables to rescale
+rescale_ema <- c("mood_positive", "mood_negative", "event_tot", "activity_tot", "social_tot", "physical_tot", "physical_excercise_dur")
+
+# Rescaling
+for (i in rescale_ema){
+    #Subject Mean centering
+    cen <- paste(i, "c", sep="_")
+    EMA_Data[cen] <- calc.mcent(x=EMA_Data[[i]], id=castor_record_id, data=EMA_Data)
+    # Z-Transform
+    ztrans <- paste(i, "z", sep="_")
+    EMA_Data[ztrans] <- scale(EMA_Data[[i]], center = TRUE, scale = TRUE)
+    # Rescale
+    stran <- paste(i, "s", sep="_")
+    EMA_Data[stran] <- scales::rescale(EMA_Data[[ztrans]], to=c(1, 10))
+    # Get Mean
+    smean <- paste(i, "m", sep="_")
+    EMA_Data[smean] <- calc.mean(EMA_Data[[i]], id=Sub_nr_week, data=EMA_Data, expand=TRUE)
+    # Z-Transom mean 
+    mztrans <- paste(i, "mz", sep="_")
+    EMA_Data[mztrans] <- scale(EMA_Data[[smean]], center = TRUE, scale = TRUE)
+    # Lag the variable
+    lagtrans <- paste(i, "l", sep="_")
+    EMA_Data[lagtrans] <- lag_var(x=stran, id="Sub_nr_week", obs="obs", day= "ema_day_num", data=EMA_Data, lag=1)   
+}
+
+# I cant do this in a loop, but I also want to rescale the subject centered values
+EMA_Data <-EMA_Data %>% group_by(castor_record_id) %>%
+    mutate(mood_positive_cs= scales::rescale(mood_positive_c,to=c(1,10)),
+           mood_negative_cs= scales::rescale(mood_negative_c,to=c(1,10)),
+           event_tot_cs= scales::rescale(event_tot_c,to=c(1,10)),
+           activity_tot_cs= scales::rescale(activity_tot_c,to=c(1,10)),
+           social_tot_cs= scales::rescale(social_tot_c,to=c(1,10)),
+           physical_tot_cs= scales::rescale(physical_tot_c,to=c(1,10))) %>% ungroup()
+```
+
+
+#### Mean Stress {-}
+After deriving the rescaled measures, we also calculate the mean stress states which we use for plotting our variables.
+```{r}
+##Average stress Measure
+EMA_Data$mean_stress <- rowSums(EMA_Data[c('event_tot_z', 'activity_tot_z', 'social_tot_z')], na.rm=TRUE)
+EMA_Data$mean_stress_c <- rowSums(EMA_Data[c('event_tot_c', 'activity_tot_c', 'social_tot_c')], na.rm=TRUE)
+EMA_Data$mean_stress_s <- scales::rescale(EMA_Data$mean_stress_c, to=c(1, 10))
+EMA_Data$mean_stress_l <- lag_var(x="mean_stress_c", id="Sub_nr_week", obs="obs", day= "ema_day_num", data=EMA_Data, lag=1)
+
+```
+
+### EPA Variables {.tabset}
+
+Now we can clean up some of the physiology data. Since most of the cleaning has already been done in python, only more basic processing is done here. For example, there was one watch that had a faulty temperature sensor. To avoid losing data for a variable in our covariates only, we replace this with values from the mean and standard deviation of the population instead. 
+
+```{r echo=TRUE}
+# Count of replaced entries
+n_temp <- count(EMA_Data$temp_mean > 50)
+n_replace <- n_temp$freq[2]
+# Subset dataframe with normal values
+temp_df <- EMA_Data
+temp_df <- filter(temp_df, temp_df$temp_mean < 50)
+# Convert mean nans to 0 to apply condition replacement
+EMA_Data$temp_mean[is.na(EMA_Data$temp_mean)] <- 0
+
+# Loop over temperature values for replacement
+temp_variables <- list("temp_median", "temp_sd", "temp_slope", "temp_mean")
+for (i in temp_variables){
+    # Get the mean and SD to replace values 
+    mean_t <- mean((temp_df[[i]]), na.rm=T)
+    sd_t<- sd((temp_df[[i]]),na.rm=T)
+    # Replace Mean Temp with distribution
+    temp_vect <- runif(n=n_replace, min = (mean_t-sd_t), max =(mean_t+sd_t)) # Vector for replacements
+    EMA_Data[i] <- replace(EMA_Data[[i]], (EMA_Data$temp_mean>50), temp_vect)
+}
+
+# Revert 0 to NAN
+EMA_Data$temp_mean[EMA_Data$temp_mean==0] <- NA
+
+```
+
+
+Second, in the python script, if no skin coductance responses are detected, our pipeline returns NaNs. This is not an adequate representation of the data, and as such, we replace periods where signal was detected, but no responses were detected with 0. 
+
+```{r}
+EMA_Data$sc_phasic_dur[(!is.na(EMA_Data$sc_tonic_mean)) & (is.na(EMA_Data$sc_phasic_dur))] <- 0
+EMA_Data$sc_phasic_num[(!is.na(EMA_Data$sc_tonic_mean)) & (is.na(EMA_Data$sc_phasic_num))] <- 0
+EMA_Data$sc_phasic_mag[(!is.na(EMA_Data$sc_tonic_mean)) & (is.na(EMA_Data$sc_phasic_mag))] <- 0
+
+``` 
+
+We will finally subject center, rescale, and mean center the EPA data simalr to the EMA data. We do this for each of our measures below.
+
+#### Heart Rate {-}
+```{r}
+# Variables to rescale
+rescale_phy <- c("hr_mean", "hr_sd", "hr_min", "hr_max", "ibi_mean", "ibi_sd")
+
+# Rescaling
+for (i in rescale_phy){
+    #Subject Mean centering
+    cen <- paste(i, "c", sep="_")
+    EMA_Data[cen] <- calc.mcent(x=EMA_Data[[i]], id=castor_record_id, data=EMA_Data)
+    # Z-Transform
+    ztrans <- paste(i, "z", sep="_")
+    EMA_Data[ztrans] <- scale(EMA_Data[[i]], center = TRUE, scale = TRUE)
+    # Rescale
+    stran <- paste(i, "s", sep="_")
+    EMA_Data[stran] <- scales::rescale(EMA_Data[[ztrans]], to=c(1, 10))
+    # Get Mean
+    smean <- paste(i, "m", sep="_")
+    EMA_Data[smean] <- calc.mean(EMA_Data[[i]], id=Sub_nr_week, data=EMA_Data, expand=TRUE)
+    # Z-Transom mean 
+    mztrans <- paste(i, "mz", sep="_")
+    EMA_Data[mztrans] <- scale(EMA_Data[[smean]], center = TRUE, scale = TRUE)
+    # Lag the variable
+    lagtrans <- paste(i, "l", sep="_")
+    EMA_Data[lagtrans] <- lag_var(x=stran, id="Sub_nr_week", obs="obs", day= "ema_day_num", data=EMA_Data, lag=1)   
+}
+
+
+# Now to get cs values
+EMA_Data <-EMA_Data %>% group_by(castor_record_id) %>%
+    mutate(hr_mean_cs= scales::rescale(hr_mean_c,to=c(1,10)),
+           hr_min_cs= scales::rescale(hr_min_c,to=c(1,10)),
+           hr_max_cs= scales::rescale(hr_max_c,to=c(1,10))) %>% ungroup()
+
+```
+
+#### Skin Conductance {-}
+```{r}
+
+# Variables to rescale
+rescale_phy <- c("sc_tonic_mean", "sc_phasic_mean", "sc_phasic_mag" , "sc_phasic_dur", "sc_phasic_num", "sc_phasic_auc")
+
+# Rescaling
+for (i in rescale_phy){
+    #Subject Mean centering
+    cen <- paste(i, "c", sep="_")
+    EMA_Data[cen] <- calc.mcent(x=EMA_Data[[i]], id=castor_record_id, data=EMA_Data)
+    # Z-Transform
+    ztrans <- paste(i, "z", sep="_")
+    EMA_Data[ztrans] <- scale(EMA_Data[[i]], center = TRUE, scale = TRUE)
+    # Rescale
+    stran <- paste(i, "s", sep="_")
+    EMA_Data[stran] <- scales::rescale(EMA_Data[[ztrans]], to=c(1, 10))
+    # Get Mean
+    smean <- paste(i, "m", sep="_")
+    EMA_Data[smean] <- calc.mean(EMA_Data[[i]], id=Sub_nr_week, data=EMA_Data, expand=TRUE)
+    # Z-Transom mean 
+    mztrans <- paste(i, "mz", sep="_")
+    EMA_Data[mztrans] <- scale(EMA_Data[[smean]], center = TRUE, scale = TRUE)
+    # Lag the variable
+    lagtrans <- paste(i, "l", sep="_")
+    EMA_Data[lagtrans] <- lag_var(x=stran, id="Sub_nr_week", obs="obs", day= "ema_day_num", data=EMA_Data, lag=1)   
+}
+
+# Now to get cs values
+EMA_Data <-EMA_Data %>% group_by(castor_record_id) %>%
+    mutate(sc_tonic_mean_cs= scales::rescale(sc_tonic_mean_c,to=c(1,10)),
+           sc_phasic_mag_cs= scales::rescale(sc_phasic_mag_c,to=c(1,10)),
+           sc_phasic_dur_cs= scales::rescale(sc_phasic_dur_c,to=c(1,10)),
+            sc_phasic_auc_cs= scales::rescale(sc_phasic_auc_c,to=c(1,10)),
+            sc_phasic_num_cs= scales::rescale(sc_phasic_num_c,to=c(1,10))) %>% ungroup()
+```
+
+#### Temperature {-}
+```{r}
+
+# Temp
+# Mean
+EMA_Data$temp_mean_c <- calc.mcent(temp_mean,Sub_nr_week, data=EMA_Data )
+EMA_Data$temp_mean_z <- scale(EMA_Data$temp_mean, center = TRUE, scale = TRUE)
+EMA_Data$temp_mean_l <- lag_var(x="temp_mean_z", id="Sub_nr_week", obs="obs", day= "ema_day_num", data=EMA_Data, lag=1)
+# Slope
+EMA_Data$temp_slope_c <- calc.mcent(temp_slope,Sub_nr_week, data=EMA_Data )
+EMA_Data$temp_slope_z <- scale(EMA_Data$temp_slope, center = TRUE, scale = TRUE)
+EMA_Data$temp_slope_l <- lag_var(x="temp_slope_z", id="Sub_nr_week", obs="obs", day= "ema_day_num", data=EMA_Data, lag=1)
+# SD
+EMA_Data$temp_sd_c <- calc.mcent(temp_sd,Sub_nr_week, data=EMA_Data )
+EMA_Data$temp_sd_z <- scale(EMA_Data$temp_sd, center = TRUE, scale = TRUE)
+```
+
+Now that we are done with the data cleaning, we can move on to the analysis.
+
 
 Using python, we derived physiological arousal features in 10-minute time windows prior to each EMA survey from the raw EPA wristwatch data for each participant. Preprocessing is done through python with the [pyphysio package](https://github.com/MPBA/pyphysio) which has some tools for processing bio-signals. EMA data is not processed during this phase and the raw output from the surveys is loaded into R. Among other things, the EMA and EPA signals contain the following features:
 
