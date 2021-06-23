@@ -1,11 +1,11 @@
 ---
-title: "Momentary mood and arousal predict real-life prolonged stress"
+title: "Momentary mood and arousal detect real-life prolonged stress"
 author: "Rayyan Tutunji"
-date: "15-04-2021"
+date: "21-04-2021"
 output:
   html_notebook:
     number_sections: yes
-    theme: material
+    theme: flatly
     toc: yes
     toc_float: 
         collapsed: true 
@@ -18,10 +18,6 @@ output:
     toc_depth: 4
     toc_float:
       collapsed: no
-  pdf_document:
-    toc: yes
-  word_document:
-    toc: yes
 editor_options:
   chunk_output_type: inline
 ---
@@ -29,11 +25,11 @@ editor_options:
 
 # Introduction
 
-This analysis notebook accompanies the paper **Momentary mood and arousal predict real-life prolonged stress** by Tutunji et al. 2021, and utilizes data from the study "Stress Reslience and the Brain in Medical Students (STRAIN-MD)". Study design details can be fined in the [original article](paste link after publication), but a brief summary is provided here to assist in analysis comprehension. In this study, participants completed two weeks of Ecological Momentary Asessments (EMA/ESM) coupled with Ecological Physiological Assessments (EPA). One of these weeks culminated in a high-stakes exam, while the other was outside of examination periods thus providing a stress and control week respectively. EMA consisted of questions regarding subjective stress, and positive and negative affect. EPA within the context of this study consisted of a [wearable device](https://www.empatica.com/research/e4/) that collected continuous measures of physiological arousal. Using these measures, we first validate our stress exposure by examining changes in subjective stress ratings between the two week. We then demonstrate the impact of stress exposure on mood and arousal measures. We then explore our findings by looking at continuous associations between subjective stress and outcomes. Finally, we demonstrate the feasibility of Mood and EPA measures in prediction of stress and control weeks using machine learning models. 
+This analysis notebook accompanies the paper **Using wearable biosensors and ecological momentary assessments for the detection of prolonged stress in real life** by Tutunji et al. 2021, and utilizes data from the study "Stress Reslience and the Brain in Medical Students (STRAIN-MD)". Study design details can be founed in the [original article](paste link after publication), but a brief summary is provided here to assist in reading comprehension. In this study, participants completed two weeks of Ecological Momentary Asessments (EMA/ESM) coupled with Ecological Physiological Assessments (EPA). One of these weeks culminated in a high-stakes exam, while the other was outside of examination periods thus providing a stress and control week respectively. EMA consisted of questions regarding subjective stress, and positive and negative affect. EPA within the context of this study consisted of a [wearable device](https://www.empatica.com/research/e4/) that collected continuous measures of physiological arousal. Using these measures, we first validate our stress exposure by examining changes in subjective stress ratings between the two week. We then demonstrate the impact of stress exposure on mood and arousal measures. We then explore our findings by looking at continuous associations between subjective stress and outcomes. Finally, we demonstrate the feasibility of Mood and EPA measures in prediction of stress and control weeks using machine learning models. 
 
-All custom functions and code can be found in [associated GitHub directory](https://github.com/raytut/Paper_PredictingStress). Libraries used are listed below.
+All custom functions and code can be found in [associated GitHub directory](https://github.com/raytut/DetectingStress/tree/main/code). Libraries used listed at the end of the document. In addition to the libraries, we also used prespecified themes for ggplots that make some plots easier to draw. These are all run in the set-up chunks. 
 
-```{r message=FALSE, warning=FALSE}
+```{r Import Libraries, echo=FALSE, message=FALSE, warning=FALSE, setup=TRUE}
 
 # Libraries to import and clean data
 library(readxl)
@@ -78,6 +74,7 @@ library(randomForest)
 
 #Plotting
 library(ggplot2) # Standard plotting
+library(qgraph) # MLVAR Network Plotting
 library(ggpubr)
 library(knitr)
 
@@ -116,25 +113,18 @@ NoCores <- as.numeric(availableCores())-1
   
 ```
 
-Before starting, we also load the custom functions written for the study that are found in the GitHub directory.
+Before starting, we also load the custom functions generated.
 ```{r}
 source("functions.R")
 ```
 
-
 # Data
-
-
-We first load in the descriptive file here, and perform some cleaning to make the file more human friendly. The descriptive information is stored in a different file than the EMA information to avoid linking the any potential identifying information to the actual data. This section is redacted from the public documentation for this reason.
-
-# Data
-
 
 We first load in the descriptive file here, and perfrom some cleaning to make the file more human friendly. The descriptive information is stored in a different file than the EMA information to avoid linking the any potential identifying information to the actual data. This section is redacted from the public documentation for this reason.
 
 ```{r}
 # Get descritpive stats
-EMA_descr <- read.delim("data/descriptives.txt")
+EMA_descr <- read.delim("../data/descriptives.txt")
 
 # Cleanup
 EMA_descr$castor_record_id <- EMA_descr$Subject_ID
@@ -168,7 +158,7 @@ We then load this file, and recode some variables and perfrom some specific clea
 ```{r EMA Data Import}
 
 # Read Data
-EMA_Data <- read.csv("data/EMA_Clean_Features_10min.csv") 
+EMA_Data <- read.csv("../data/EMA_Clean_Features_10min.csv") 
 
 # Precleaning
 #First change types incase of improper input
@@ -192,8 +182,8 @@ EMA_Data$First_Week <- as.factor(EMA_Data$First_Week)
 # Keep only distict
 EMA_Data <- EMA_Data %>% distinct(Sub_nr_week, obs, .keep_all=T)
 
-EMA_Data$week_type <- EMA_Data$week_type-1
-EMA_Data$Week_Type <- factor(EMA_Data$week_type, levels=c('0','1'),
+EMA_Data$week_type <- EMA_Data$week_type
+EMA_Data$Week_Type <- factor(EMA_Data$week_type, levels=c('1','2'),
                          labels=c('Control','Stress'))
 ```
 
@@ -497,38 +487,6 @@ EMA_Data$temp_sd_c <- calc.mcent(temp_sd,Sub_nr_week, data=EMA_Data )
 EMA_Data$temp_sd_z <- scale(EMA_Data$temp_sd, center = TRUE, scale = TRUE)
 ```
 
-Now that we are done with the data cleaning, we can move on to the analysis.
-
-
-Using python, we derived physiological arousal features in 10-minute time windows prior to each EMA survey from the raw EPA wristwatch data for each participant. Preprocessing is done through python with the [pyphysio package](https://github.com/MPBA/pyphysio) which has some tools for processing bio-signals. EMA data is not processed during this phase and the raw output from the surveys is loaded into R. Among other things, the EMA and EPA signals contain the following features:
-
-- Event Related Stress
-- Activity Related Stress
-- Physical Stress
-- Social Stress
-- Mood (Positive and Negative)
-- Heart rate (High/Low Frequency, RMSSD, IBI...)
-- Skin Conductance (Phasic, Tonic, Magnitude...)
-- Skin Temperature (Slope, Mean)
-- Accelorometer Data (delta ACC, mean X,Y,Z direction)
-
-
-Due to privacy issues, only a specific file (and not the full file) with anonymized categorical variables for the program are provided in this code. All data presented can be used for replication of the findings. Generated variables include different suffixes, which each represent an alternative mode of calculating summary statistics. Below is a description of what each suffix stands for:
-
-- c:  Variable is subject mean centered
-- z:  Variable is z-transformed at the population level (centered and scaled)
-- s:  Variable is Z-transformed and re-scaled to 1-10 for analysis with different model families
-- m:  Variable mean in each week for each subject 
-- mz: Variable mean from above is z-transformed
-- l:  Variable is Temporally Lagged (-1)
-- cs: Variable is subject centered, then re-scaled to 1-10
-
-Below is the anonymized data frame used for the analysis:
-```{r}
-#EMA_Data <- read.csv("data/EMA_Clean_Anon.csv")
-print(EMA_Pub)
-```
-
 
 # Descriptives Stats
 
@@ -536,7 +494,7 @@ Before running any stats, we should take a look at some descriptive stats to get
 
 ## Compliance Rates  {.tabset}
 
-Lets first check compliance rates to see how well our subjects adhered to the sampling scheme. We first check the compliance rates uncorrected for the time at which they were acquired, followed by correction of the time limits. We set this to 1 hour since we only have 6 surveys, and our subjects had varying time schedules.
+Lets first check compliance rates to see how well our subjects adhered to the sampling scheme. We first check the compliance rates uncorrected for the time at which they were acquired, followed by correction of the time limits. We set this to 1 hour since we only have 6 surveys, and our subjects had varying time schedules. 
 
 ### Uncorrected Compliance {-}
 Compliance rates uncorrected for time off-sets
@@ -552,7 +510,7 @@ summary(calc.nomiss(completed, castor_record_id, data=EMA_Data, prop=TRUE))
 Without correcting for time offsets, our EMA measures seem to be nice. Lets see if I correct for timing if it makes a difference next what will happen. We will give participant one hour to finish the survey. If they don't finish it in that time window, we will count it as missing.
 
 ### Corrected Compliance {-}
-Compliance rates correcting for time of completion.  first drop any survey that is not complete more than 80%. I then create a variable that tells as when the survey was completed in terms of time (not date). I then conditionally set the completion variable to zero if the survey does not fall within the completed time window given the beep. 
+Compliance rates correcting for time of completion. First drop any survey that is not complete more than 80%. I then create a variable that tells as when the survey was completed in terms of time (not date). I then conditionally set the completion variable to zero if the survey does not fall within the completed time window given the beep. 
 ```{r EMA Data: Check Compliance while account for Time}
 
 # Set up some stuff for replace and refill
@@ -575,6 +533,7 @@ summary(calc.nomiss(completed, castor_record_id, data=EMA_Data,prop=TRUE))
 ```
 
 ### Usable Physiology {-}
+We also check the completion rates for periods where we have detected usable physiology in our pipeline. We do this by estimating the number of times where we successfully detected skin conductance,
 ```{r}
 summary(calc.nomiss(sc_tonic_mean, castor_record_id, data=EMA_Data,prop=TRUE))
 ```
@@ -625,7 +584,7 @@ ggplot(EMA_Data, aes(x=physical_disruption)) + geom_histogram(bins = 7)
 After getting the population descriptive, we should next derive some E4 Quality measures. A lot of the data which is poor quality is already removed early on in the preprocessing pipeline. Instead we can check how many recordings were captured for the IBI data, and the overall movement during testing.
 
 ### IBI Based Quality {-}
-This is a measure of what duration of time the detected heart beats cover. We see that for the mean is 27% of time with beats detected. 
+This is a measure of what duration of time the detected heart beats cover. So within a 10minute time window, we would want to detect 10 minutes of total IBI time if we had 100% signal. We see that for the mean is 27% of time with beats detected instead. This indicates that we do not have enough data for temporal domain analysis. 
 ```{r}
 ggplot(EMA_Data, aes(x=ibi_based_quality, colour=ibi_based_quality)) + geom_histogram()
 count(EMA_Data$ibi_based_quality > 0.3)
@@ -633,7 +592,7 @@ psych::describe(EMA_Data$ibi_based_quality)
 ```
 
 ### IBI and ACC {-}
-Next we will check if the IBI quality is related to the ACC data. This gives us a good idea of how much motion is affecting our data. 
+Next we will check if the IBI quality is related to the ACC data. This gives us a good idea of how much motion is affecting our data. We see it has a big impact. When people are not moving, we are able to detect the entire IBI window. This means we should include movement in our models. 
 ```{r}
 ggplot(EMA_Data, aes(x=ibi_based_quality, y=acc_delta)) + geom_smooth(method="lm", fullrange=F ) + coord_cartesian(ylim = c(0,10), xlim=c(0, 2.5))  + ggtheme + theme(axis.ticks.y=element_line(size=1), axis.text.y = element_text(size=12)) + ylab("ACC Delta") + xlab ("IBI Based Quality")
 ```
@@ -648,7 +607,7 @@ summary(lm(ibi_based_quality ~ hr_sd, data=EMA_Data))
 ```
 
 ### SC and ACC {-}
-Next we will check if the SC signals are related to the ACC. Basically this is just doing exploratory analysis to double check certain things we already. 
+Next we will check if the skin conductance signals are related to the ACC. Basically this is just doing exploratory analysis to double check whether movement also impacts skin conductance measures. We see here that it also does indeed impact our measures. 
 ```{r message=FALSE, warning=FALSE}
 
 fig.sc_tonic <- ggplot(EMA_Data, aes(x=sc_tonic_mean, y=acc_delta)) + geom_smooth(method="lm", fullrange=F )   + ggtheme + theme(axis.ticks.y=element_line(size=1), axis.text.y = element_text(size=12)) + ylab("ACC Delta") + xlab ("SC Tonic")  
@@ -672,7 +631,7 @@ fig.sc_mag
 ```
 
 ## Trends in EMA
-We finally plot the graphs of the EMA items over time in each of the weeks for some exploratory analysis.
+We finally plot the graphs of the EMA items over time in each of the weeks for some exploratory analysis.We see here that there is an effect of time (higher stress in mid-day), and an effect of day. The closer they are to exams, the more stressed they are. This means we need to include these in our models. 
 ```{r message=FALSE, warning=FALSE}
 
 vars.ema <- c( "event_tot_z", "activity_tot_z", "social_tot_z", "physical_tot_z", "mood_positive_z", "mood_negative_z")
@@ -683,15 +642,13 @@ for ( i in vars.ema) {
 
 ```
 
-It looks like we have a bit of a trend in our data. The closer we are to the exams, the more stress people become. We will need to add this to our models to correct for the trend statistically.
+.
 
 ## Aggregate Stress {.tabset}
 
 After plotting our variables over all the week, it will be interesting to check the aggregate stress changes, and how each subjects stress reactivity looks like. For this, we make an average dataframe across the weeks, so we can look at the average change in mood. 
 
 ```{r Plot: Aggregate and Stress Change, warning=FALSE}
-
- 
 #Average Stress per Week:
 EMA_avg <- EMA_Data
 # Now I can do some merging
@@ -756,7 +713,9 @@ scat_str + scale_color_gradient(low="blue", high="red") + coord_fixed(xlim = c(-
 
 We can now run the actual statistics. We use mixed effects models to first validate our paradigm by looking at overall changes in our subjective stress measures between the two weeks. We then go one to investigate the effects of the stress exposure (i.e., stress week) on our outcomes of affect and arousal. We finally investigate and explore the moment-to-moment associations between subjective stress and the outcomes, and then further explore these effects with follow-up analyses and a mediation analysis. 
 
-All our models are fit in a maximal approach. We fit fixed effects for all the main effect of interest, with a random slope. We also fit fixed effects with fixed slopes for all the covariates. If a covariate is categorical with fewer than 6 levels, then we only fit fixed effects and no random slopes. Finally, we model subject as the random main random effect. For each model, we test the multiple families and links, and using the AIC and residual fit, we select the best model. In the results below, we present the final selected models for brevity. Models are commented when producing this notebook to simplify the generation of the html file. 
+All our models are fit in a maximal approach. We fit fixed effects for all the main effect of interest, with a random slope. We also fit fixed effects with fixed slopes for all the covariates. If a covariate is categorical with fewer than 6 levels, then we only fit fixed effects and no random slopes. Finally, we model subject as the main random effect. For each model, we test the multiple families and links, and using the AIC and residual fit, we select the best model. In the results below, we present the final selected models for brevity. Models are commented when producing this notebook to simplify the generation of the html file. 
+
+Additionally, we check models for mulitcolinearity using models without interaction terms. Models reported here are the final ones, with the interaction terms which inflates multicolinearity estimates.
 
 
 ## Week vs Week Differences
@@ -769,7 +728,7 @@ The first models will look at the subjective stress measures, and how those chan
 
 
 #### Event Related Stress {-}
- 
+Event related stress is related to the most prominent event participants expreinced in between the surveys.
 ```{r}
 # Model
 # glmer.event_week <- lmer(event_tot_s ~ Week_Type +  #Model week
@@ -786,12 +745,12 @@ The first models will look at the subjective stress measures, and how those chan
 # Model Summary
 model_output(glmer.event_week)
 
-
 ```
 
 
 
 #### Activity Related Stress {-}
+Activity related stress is stress related to the activity participants were engaged in just before receiving the survey.
 ```{r}
 # Model
 # glmer.activity_week <- lmer(activity_tot_s ~ Week_Type +  #Model week
@@ -813,7 +772,7 @@ model_output(glmer.activity_week )
 
 
 #### Social Stress {-}
-
+Relates to stress derived from social interactions, or lack thereof.
 ```{r}
 # Model
 # glmer.social_week <- glmer( social_tot_s ~ Week_Type +  #Model week
@@ -834,7 +793,7 @@ model_output(glmer.social_week)
 
 
 #### Physical Stress {-}
-
+Control items assessing physical discomfort or illness. 
 ```{r warning=FALSE}
 # Model
 # glmer.physical_week<- lmer( physical_tot_s ~ Week_Type +  #Model week
@@ -856,16 +815,15 @@ model_output(glmer.physical_week)
 #### Results: Subjective Stress v Week{-}
 We tabulate the results, and produce a regression effect plot to visualize the results. 
 ```{r}
-tab_model(glmer.event_week, glmer.activity_week,  glmer.social_week, glmer.physical_week, 
+table.stress_week <- tab_model(glmer.event_week, glmer.activity_week,  glmer.social_week, glmer.physical_week, 
            terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur"), 
           dv.labels=c("Event", "Activitiy", "Social", "Physical"), 
-          title="Table 1. Subjective Stress vs Week Type", show.df=T, show.fstat = T,
+          title="Table 1. Subjective Stress vs Week Type", show.df=F, show.fstat = T,
           transform=NULL, 
          show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
+         show.se=TRUE)
+htmlTable::htmlTable(table.stress_week$knitr)
+
 ```
 
 
@@ -909,7 +867,7 @@ ggsave("figures/fig_WeekResid_SubjectiveStress.tiff",units="in", width=4, height
 
 ### Mood {.tabset}
 
-Next, we want to investigate the impact of an examination period on mood. Conceptually, mood is more of an outcome of being stressed than a measure of stress.
+Next, we want to investigate the impact of an examination period on mood. Conceptually, mood is an outcome of being stressed, and not a direct measure of stress. Below are the results of the models for both positive and negative mood.
 
 #### Positive{-}
 
@@ -954,23 +912,21 @@ model_output(glmer.negmood_week)
 #### Results: Mood vs Subjective Stress{-}
 
 ```{r}
-tab_model(glmer.posmood_week, glmer.negmood_week,
+table.mood_week <- tab_model(glmer.posmood_week, glmer.negmood_week,
           terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur"), 
           dv.labels=c("Positive", "Negative"), 
           title="Table 2. Mood vs Week Type", 
           transform=NULL, 
          show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
+         show.se=TRUE)
+htmlTable::htmlTable(table.mood_week$knitr)
 ```
 
 
 
 ### Phyisiology Stress
 
-We established changes in subjective stress between the weeks, which has an impact on our mood outcomes. We also want to see if there's a general difference between the physiology variables and the weeks.To do this we apply the same approach for the physiology measures as the other models. We also add measures of skin temperature here however, to make sure that we factor this in. Skin temperature is important as it can be related to sweat or heat, which can also lead to increased arousal. 
+We established changes in subjective stress between the weeks, which has an impact on our mood outcomes. We also want to see if there's a general difference between the physiology variables and the weeks.To do this we apply the same approach for the physiology measures as the other models. We also add measures of skin temperature here however, to make sure that we factor this in. Skin temperature is important as it can be related to sweat or heat, which can also lead to increased arousal measures. 
 
 #### Skin Conductance {.tabset .tabset-fade}
 
@@ -989,7 +945,7 @@ First we model the skin conductance, controlling for skin temperature and physic
 #     (0+temp_slope_z|castor_record_id) + (0+temp_mean_z|castor_record_id) + 
 #     (0+physical_excercise_dur|castor_record_id) + (0+acc_delta|castor_record_id) + 
 #     (1 | castor_record_id:ema_day:ema_beep_f), 
-#     EMA_Pub, 
+#     EMA_Data, 
 #     family=Gamma(link="log"),
 #     control=glmerControl(calc.derivs = FALSE, optCtrl=list(maxfun=100000)))
 
@@ -1147,17 +1103,16 @@ model_output(glmer.hr_min_week)
 #### Results: Physiology vs Weektype
 We now present the physiology results in a table, corrected for multiple comparisons with FDR.
 ```{r}
-tab_model(glmer.sc_ton_mean_week, glmer.sc_ph_num, glmer.sc_ph_mag, glmer.sc_ph_auc_week, glmer.hr_mean_week, glmer.hr_min_week, glmer.hr_max_week, 
+table.physio_week <- tab_model(glmer.sc_ton_mean_week, glmer.sc_ph_num, glmer.sc_ph_mag, glmer.sc_ph_auc_week,
+                           glmer.hr_mean_week, glmer.hr_min_week, glmer.hr_max_week, 
          terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur", 
          "temp_mean_z", "temp_slope_z"), 
           dv.labels=c("Tonic", "Number", "Magnitude", "AUC", "Mean", "Min", "Max"), 
           title="Table 3. Physio vs Week Type", 
           transform=NULL, p.adjust="fdr",
          show.stat=TRUE,
-         show.se=T) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
+         show.se=T) 
+htmlTable::htmlTable(table.physio_week$knitr)
 ```
 
 
@@ -1210,7 +1165,7 @@ ggsave("figures/fig_WeekResid_ALL.tiff", units="in", width=4, height=4, dpi=300,
 
 ## Momentary Associations
 
-We saw lower physiological arousal in the exam week, which was unexpected. We also see lower positive arousal. So it could be that the effects we see are actually driven by our positive arousal/mood. To check this, and to also check whether we can replicate findings on moment-to-moment associations between subjective stress and physiological arousal and mood, we discard week type, and look at the measure continuously. 
+We saw lower physiological arousal in the exam week, which was unexpected. We also see lower positive arousal. So it could be that the effects we see are actually driven by our positive arousal/mood. To check this, and to also check whether we can replicate previous indings on moment-to-moment associations between subjective stress and physiological arousal and mood, we discard week type, and look at the measure continuously. 
 
 In this models, we use a fixed slope due to convergence issues. We initially tried changing optimizers, which did not result in better convergence, so we simplified the model by doing a fixed slope for our fixed effect of interest. We again use more or less the same covariates as before, except for program, and for day. We keep the time variable in there to control for circadian rhythms. Additionally, we see there is a correlation between our subjective stress measures, so we need to factor this effect in by modeling interaction terms as well. 
 
@@ -1263,24 +1218,22 @@ model_output(glmer.posmood_beep )
 model_output(glmer.negmood_beep)
 ```
 
-#### Tabulated Models{-}
+#### Table: Mood per Beep {-}
 ```{r}
-tab_model(glmer.posmood_beep, glmer.negmood_beep,
+table.mood_beep <- tab_model(glmer.posmood_beep, glmer.negmood_beep,
          # terms=c("(Intercept)","Week_Type [Stress]", "Sex [Male]", "Program [BSc_Med]", "First_Week [Exam-First]", "acc_delta", "physical_excercise_dur"), 
           title="Table 3. HR vs Week Type", 
           transform=NULL, p.adjust = "fdr",
          show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
+         show.se=TRUE) 
+htmlTable::htmlTable(table.mood_beep$knitr)
 ```
 
 
 
 ### Skin conductance {.tabset}
 
-We next model the skin conductance vs. the stress measures. We expect that in this analysis, we see an expected increase in arousal linked to subjective stress. We do indeed confirm this below. 
+We next model the skin conductance vs. the subjective stress measures. We expect that continuous analysis will result in a replication of previous findings where momentary stress is indeed associated with increase physiological arousal. Our findings are indeed shown in [Table: Subjective Stress and Outcomes].
 
 #### Tonic Mean {-}
 
@@ -1444,16 +1397,14 @@ model_output(glmer.hr_max_ema)
 ### Table: Subjective Stress and Outcomes
 
 ```{r}
-tab_model(glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
+table.physio_beep <- tab_model(glmer.sc_ton_ema, glmer.sc_ph_num_ema, glmer.sc_ph_mag_ema, glmer.sc_ph_auc_ema, 
             glmer.hr_mean_ema, glmer.hr_min_ema, glmer.hr_max_ema, 
           dv.labels=c("SC Tonic", "SC Number", "SC Magnitude", "SC AUC", "Mean", "Min", "Max"), 
           title="Table X. Momentary Physiology and Subjective Stress",
             transform=NULL, p.adjust="fdr", 
          show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
+         show.se=TRUE) 
+htmlTable::htmlTable(table.physio_beep$knitr)
 ```
 
 ### Plot: Outcomes v Subjective Stress
@@ -1599,9 +1550,10 @@ ggarrange(plot.event_substr, plot.activity_substr, plot.social_substr, plot.phys
 ggsave("figures/fig_StrResid_MAT.tiff", units="in", width=7, height=7, dpi=300, compression = 'lzw', bg="transparent")
 ```
 
-## Mood and Physio
+## Mood and Physiology
 
-Since we think this is an arousal related mechanism, we would also need to establish the link to physiology. To this end, we check the relationship between physiology and the mood items. We see a high correlation between positive and negative mood (presented below). So we also model interaction terms here. Due to model convergence issues, we only model the fixed intercepts here for the fixe effects of interest. Again, we check all model families before we pick the one with the best fit. 
+Arousal is not a valence specific mechanism. In the stress week, we see that there is a reduction in our physiological arousal measures, but also in positive affect. To this end, we check the relationship between physiology and the mood items. We expect that while arousal measures are indeed associated with stress, they are also associated with positive mood. 
+To this end, we model these relationships with both positive and negative affect. We use a maximal fitting approach as before.  We see a high correlation between positive and negative mood (presented below), and therefore also model interaction terms here. Due to model convergence issues, we only model the fixed intercepts here for the fixed effects of interest. Again, we check all model families before we pick the one with the best fit. 
 
 ```{r}
  rcorr(as.matrix(EMA_Data[,c("mood_positive_s", "mood_negative_s")]))
@@ -1687,19 +1639,6 @@ model_output(glmer.sc_ph_mag_mood)
 model_output(glmer.sc_ph_auc_mood)
 ```
 
-#### Tabulated Models {-}
-```{r}
-tab_model(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.sc_ph_mag_mood, glmer.sc_ph_auc_mood, 
-          dv.labels=c("Tonic", "Number", "Magnitude", "AUC"), 
-          title="Table X. SCR and Mood",
-            transform=NULL, p.adjust = "fdr",
-         show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
-```
-
 
 ### Heart Rate {.tabset}
 
@@ -1762,35 +1701,20 @@ model_output(glmer.hr_min_mood )
 model_output(glmer.hr_max_mood )
 ```
 
-#### Table: HR v Mood {-}
-```{r}
-tab_model(glmer.hr_mean_mood, glmer.hr_min_mood, glmer.hr_max_mood, 
-          dv.labels=c("Mean", "Min", "Max"), 
-          title="Table X. Heart rate vs. Mood",
-            transform=NULL, p.adjust="fdr", 
-         show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
-```
 
-
-### Table: Physio v Mood
+### Results: Mood and Physiology
 ```{r}
-tab_model(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.sc_ph_mag_mood, glmer.sc_ph_auc_mood,
+table.physio_mood <- tab_model(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.sc_ph_mag_mood, glmer.sc_ph_auc_mood,
                 glmer.hr_mean_mood, glmer.hr_min_mood, glmer.hr_max_mood,
           dv.labels=c("SC Tonic", "SC Number", "SC Magnitude", "SC AUC", "HR Mean", "HR Min", "HR Max"), 
           title="Table X. Physio vs. Mood",
             transform=NULL, p.adjust="fdr", 
          show.stat=TRUE,
-         show.se=TRUE) %>%  
-    return() %$%
-    knitr %>%
-    asis_output()
+         show.se=TRUE)
+htmlTable::htmlTable(table.physio_mood$knitr)
 ```
 
-### Plot: Physio v Mood
+
 ```{r}
 # Subset variables of interests
 plot.physio <- plot_models(glmer.sc_ton_mood, glmer.sc_phnum_mood, glmer.hr_mean_mood)
@@ -1835,81 +1759,71 @@ ggsave("figures/fig_MoodkResid_ALL.tiff", units="in", width=5, height=5, dpi=300
 
 ## Mediation anaylsis
 
-In the stress week, we see a decrease in both positive mood and physiology. However, we also see an increase in stress, which we know is related to some physiology (specifically, SC magnitude). So we need to actually confirm that what we see in the stress week (i.e. the physiology arousal decrease) is actually due to the positive mood changes. To this end, we perfrom a mediation analysis. We first need to filter out the nan's here for some reason though, and we cant really add any covariates in an easy way. So we will stick to the simplest model here. 
+In the stress week, we see a decrease in both positive mood and physiology. However, we also see an increase in stress during this time too. This is confusing given the moment to moment relationship between subjective stress and physiology. One potential explanation is that the physiology is more strongly associate with positive arousal and opposed to negative arousal. So we need to actually confirm that what we see in the stress week (i.e. the physiology arousal decrease) is actually due to the positive mood changes. To this end, we perfrom a mediation analysis. We first need to filter out the nan's here for some reason though. We cant apply this analysis to mixed level models, so we instead just check the simple models here.
 
 ```{r}
 library(mediation)
 set.seed(123)
 
-EMA_Sub <- EMA_Data %>% dplyr::select(castor_record_id, week_type, sc_phasic_mag_s, sc_phasic_num_s, mood_positive_s, event_tot_s,  Sex, Program, # Model pop differences
+EMA_Sub <- EMA_Data %>% dplyr::select(castor_record_id, Week_Type, sc_phasic_mag_s, sc_phasic_num_s, mood_positive_s, event_tot_s,  Sex, Program, # Model pop differences
     First_Week,  ema_beep_f, ema_day, 
     physical_excercise_dur, acc_delta, 
     temp_mean_z,temp_slope_z) %>% filter(complete.cases(.))
 ```
 
+Two arousal measures were reduced in the stress week, but also associated with increased subjective stress. These measures were the **number of skin conductance responses** and the **magnitude of skin conductance responses**. So here we will check the mediating effect of positive mood. 
 
-### Mediate Number
-First we checke whether positive mood mediates the effects of week type of the number of responses
+### SC Number
+First we check whether positive mood mediates the effects of week type of the number of responses. We see in the control week, there is a trend with positive affect mediating  the number of skin conductace responses. 
 ```{r}
-# Main effect
-fit.totaleffect=glmer(sc_phasic_num_s ~ week_type + (1|castor_record_id), EMA_Sub)
-summ(fit.totaleffect)
+# Main effe
+fit.totaleffect=glmer(sc_phasic_num_s ~ Week_Type + (1|castor_record_id), EMA_Sub)
+#summary(fit.totaleffect)
 
 # Mediations
-fit.mediator=glmer(mood_positive_s ~ week_type + (1|castor_record_id), EMA_Sub)
-summ(fit.mediator)
+fit.mediator=glmer(mood_positive_s ~ Week_Type + (1|castor_record_id), EMA_Sub)
+#summary(fit.mediator)
 
 # Combined
-fit.dv=glmer(sc_phasic_num_s ~ week_type*mood_positive_s + (1|castor_record_id), EMA_Sub)
-summ(fit.dv)
+fit.dv=glmer(sc_phasic_num_s ~ Week_Type*mood_positive_s + (1|castor_record_id), EMA_Sub)
+#summary(fit.dv)
 
 # Mediation analysis
-results1 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='week_type', mediator='mood_positive_s', boot=F, sims=5000)
+results1 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='Week_Type', mediator='mood_positive_s', sims=5000, control.value="Control", treat.value="Stress")
 summary(results1)
 
 ```
 
-### Mediate Magnitude
-Then we check the mediation effects on the magnitude of the SC responses.
+### SC Magnitude
+We next check the mediating effect of positive affect on skin coductance magnitde. Here we see that the magnitude of the responses is significanlty mediated by positive affect. It seems in both cases, these effects are being driven by the control week.
 ```{r}
 # Main effect
-fit.totaleffect=glmer(sc_phasic_mag_s ~ week_type  + (1|castor_record_id), EMA_Sub)
+fit.totaleffect=glmer(sc_phasic_mag_s ~ Week_Type  + (1|castor_record_id), EMA_Sub)
 summ(fit.totaleffect)
 
 # Mediations
-fit.mediator=glmer(mood_positive_s ~ week_type  +  (1|castor_record_id), EMA_Sub)
+fit.mediator=glmer(mood_positive_s ~ Week_Type  +  (1|castor_record_id), EMA_Sub)
 summ(fit.mediator)
 
 # Combined
-fit.dv=glmer(sc_phasic_mag_s ~ week_type*mood_positive_s + (1|castor_record_id), EMA_Sub)
+fit.dv=glmer(sc_phasic_mag_s ~ Week_Type*mood_positive_s + (1|castor_record_id), EMA_Sub)
 summ(fit.dv)
 
 # Mediation analysis
-results2 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='week_type', mediator='mood_positive_s', boot=F, sims=5000)
+results2 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='Week_Type', mediator='mood_positive_s', boot=F, sims=5000)
 summary(results2)
 
 ```
 
-The results show that indeed, the results are mediated by positive mood in the stress week.
-
 # Random Forests
 
-We were able to establish that physiology and mood both change in the weeks under chronic stress. That is good, because now we can see how well we can use this informaiton in predictive models. To this end, we use the randomForest package plus some extra functions to test our prediction. Firrst lets set a seed and load a packacge for these analyses. 
+We were able to establish that physiology and mood both change in the weeks under chronic stress. That is good, because now we can see how well we can use this information in predictive models. To this end, we use the randomForest package plus some extra functions to test our prediction. The point of this analysis is to determine whether was can use the EPA/wristwatch measures on their own to classify which week participants are in, and to additionally check whether this would be as good as asking about mood. Finally, we will see whether the combination of both the mood and EPA measures is actually the best option. 
 
+Before we begin, we load the required library, and preset the seed to keep the analysis consistent. We additionally filter out the incomplete datapoints on only keep the full dataset 
 ```{r}
 library(randomForest)
 set.seed(123)
-```
 
-## OOB Error {.tabset}
-Before going into the details of the models, we first subset the data to omit any nans. We then check the out of back error for random forest models predicting week from the data types. We run three models predicting week type from each of the following:
-
-1. Affect
-2. Physiology
-3. Combination
-
-After checking the OOB errors, we can split the data into the training/testing sets.
-```{r}
 # Variables for Forest
 vars.forest <- c( "Week_Type", "mood_positive", "mood_negative", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
 vars.forest.physio <-c( "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "Week_Type" )
@@ -1918,10 +1832,20 @@ vars.forest.physio <-c( "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_p
 df.RandomForest <- EMA_Data[,vars.forest]
 df.RandomForest <- na.omit(df.RandomForest)
 df.RandomForest.physio <- df.RandomForest[,vars.forest.physio]
-``` 
+```
 
-### Mood {-}
-This modle classifies week type from the affect items
+## OOB Error {.tabset}
+
+We first run the first analysis to establish the Out-Of-Bag (OOB) error rate without any cross validation. This is done to establish the models first, and fine tune the paramters (for example, the number of trees required for model stability and such). This is done with three models in mind:
+
+Model 1. Mood
+Model 2. Physiology
+Model 3. Combination
+
+Model 1 classifies week from the EMA mood outcomes, while Model 2 does the same using the EPA output. We then finally test these models using the combination thereof in Model 3. After we check these models, we can then go ahead and run the models with cross validation in the next sections.Based on the OOB, we see that the combined model does the best, while the physiology model does the worst. 
+
+### Model 1: Mood {-}
+This model classifies week type from the affect items
 ```{r}
 # Run random forest model for mood vars
 forest.mood <- randomForest(Week_Type ~ mood_positive + mood_negative,
@@ -1931,8 +1855,8 @@ forest.mood <- randomForest(Week_Type ~ mood_positive + mood_negative,
 forest.mood
 ```
 
-### Physio {-}
-Now we can check what the physio data looks like. The OOB is 38.43 for the mood data. Can we do better with the full data? And what is the most important variable in these models?
+### Model 2: Physio {-}
+Now we can check what the physio data looks like. 
 ```{r}
 # Run random forest full model
 vars.forest.physio <- c( "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
@@ -1945,8 +1869,7 @@ randomForest::importance(forest.full)
 ```
 
 
-### Full {-}
-
+### Model 3: Combined {-}
 Next up we check the entire data set and see if using both is good. 
 ```{r}
 # Run the forest with most important features
@@ -1958,25 +1881,32 @@ forest.important
 ```
 
 
-Ok so first I looked at the random forest models as a whole without really doing any type of validation of the predictions. We can see that if we look at the mood, we get better predictions for stress and control weeks than looking at the whole set of physio parameters. Thats interesting, but unsurprising. We now need to do some testing and validation. 
-
 ## LOBO
 
-In order to the validation, we try out a leave-one-beep-out (LOBO) analysis. This analysis will run a random forest model for each subject separately, leaving out one survey when running the model. We then test the model on the beep that was left out. We repeat this process for the subject until we've removed each survey/beep out once. This results in a series of predictions that give us an error level for each subject. In order to do this, we have developed a function that is provided in this github directory.
+In order to perform the validation, we try out a leave-one-beep-out (LOBO) analysis. This analysis will run a random forest model for each subject separately, leaving out one survey when running the model. We then test the model on the beep that was left out. We repeat this process for the subject until we've removed each survey/beep out once. This results in a series of predictions that give us an error level for each subject. In order to do this, we have developed a function that is provided in this github directory mentioned in the introducton. This will produce the classification errors for each subject.
 
-### Model 1: Mood {-}
+We also need to test all our models against the  true chance levels. One can assume in theory that the prediction error for a dichotomous variable is 50/50, but we dont like to do things the easy way. Instead, we will do 10000 iterations where we bootstrap resample the stress and control weeks. This will give us the real error rate with a sampling distribution. This was made into a function, but for some reason I couldnt get the function to run in parallel processing on our unix system. So instead I run the parallel processing of the bootstrap outside of a function. Its not pretty, but it works. 
 
+We also test the LOBO model using against the bootstrapped LOBO model. We also made a function to do this. The function estimates the p-value by comparing it to the permuation test distribution. The function also has the option to estimate the p-value from an assumed normal distribution, but we simply use the actual distribution for this. We additionally compute a combined p-value with this function using Stoufferś method and the poolr package. 
+
+This results in the three tabs for each model:
+
+1. **Model:** Contains the actual results of the LOBO model
+2. **Bootstrap:** Contains the bootstrap error estimation results
+3. **Stouffer's tests:** Contains the tests against the null distribution and the pooled p-values
+
+### Model 1: Mood {.tabset}
+Some parts of the code are commented to make producing the notebook easier, we see that the mean LOBO error rate is 33.45 percent, and that the model performs relatively well on most subjects. Based on the estimated bootstrap error distribution of around 50%, we also show that this model performs above chance. 
 
 #### Model {-}
-We first run the LOBO model using the custom function.
 ```{r}
 # Then with the full model
 vars.forest.mood <-  c("mood_positive_c", "mood_negative_c")
-forest.lobo.mood <- rf.lobo(Data=EMA_Data,
-                              SubNr="castor_record_id",
-                           xvars=vars.forest.mood,
-                              yvar="Week_Type",
-                              NoTree=5000)
+# forest.lobo.mood <- rf.lobo(Data=EMA_Data,
+#                               SubNr="castor_record_id",
+#                            xvars=vars.forest.mood,
+#                               yvar="Week_Type",
+#                               NoTree=5000)
 as.data.frame(forest.lobo.mood$total$subject_errors)
 psych::describe(forest.lobo.mood$total$subject_errors)
 
@@ -1985,7 +1915,6 @@ psych::describe(forest.lobo.mood$total$subject_errors)
 
 
 #### Bootstrap{-}
-We see we get an estimated error of around 33% for this model. Thats cool. Now we need to test it against the random error. One can assume in theory that the prediction error for a dichotomous variable is 50/50, but we dont like to do things the easy way. Instead, we will do 10000 iterations where we bootstrap resample the stress and control weeks. This will give us the real error rate with a sampling distribution. This was made into a function, but for some reason I couldnt get the function to run in parallel. So instead I run the parallel processing of the bootstrap outside of a function. Its not pretty, but it works. 
 ```{r warning=FALSE}
 # BootstrapLOBO.
 # { cl <- makeCluster(NoCores-1)
@@ -2034,7 +1963,6 @@ boot.mood.descr
 
  
 #### Stouffer's Test{-}
-We will now test the LOBO model using Mood against the bootstrapped LOBO model with the same variables. We made a function to do this. The function estimates the p-value by comparing it to the permuation test distribution. The function also has the option to estimate the p-value from an assumed normal distribution, but we simply use the actual distribution for this. We additionally compute a combined p-value with this function using Stoufferś method and the poolr package Using this method, we see the LOBO models perfrom significantly better than chance. Yay! So within-subject approach works super well! 
 
 ```{r}
 
@@ -2044,21 +1972,20 @@ lobo.mood_null
 
 
 
+### Model 2: Physiology {.tabset}
 
-### Model 2: Physio {-}
-
-The second model I will test is whether we can predict week type from the physiology data alone. For this, I run the model first to get the LOBO error rate.
+The second model I will test is whether we can predict week type from the physiology data alone. For this model, the LOBO error rate is 36.11, which is still better than chance level predictions, but worse than model 1.
 
 #### Model {-}
-We see that it does a bit worse than model 1. But we still need to check the bootstrap error for the model with the physio data. It should be similar to that of the mood though.
+
 ```{r}
 # Then with the full model
-vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
-forest.lobo.physio <- rf.lobo(Data=EMA_Data,
-                              SubNr="castor_record_id",
-                              xvars=vars.forest.physio,
-                              yvar="Week_Type",
-                              NoTree=5000)
+# vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+# forest.lobo.physio <- rf.lobo(Data=EMA_Data,
+#                               SubNr="castor_record_id",
+#                               xvars=vars.forest.physio,
+#                               yvar="Week_Type",
+#                               NoTree=5000)
 as.data.frame(forest.lobo.physio$total$subject_errors)
 psych::describe(forest.lobo.physio$total$subject_errors)
 
@@ -2118,24 +2045,23 @@ So now that I have the averaged bootstrap error for the physio model, lets check
 ```{r}
 lobo.physio_null <- rf.null_test(forest.lobo.physio, forest.boot.physio.merge,  model_type="LOBO", method="actual")
 lobo.physio_null
-
 ```
 
 According to the t-test against the bootstrap error sample, the test is above chance level here too. I will again do a model comparison at the end of the model-testing sections.
 
-### Model 3: Full {-}
+### Model 3: Combined {.tabset}
 
-Finally we check the full model using both physio and mood variables.
+Finally we check the full model using both physio and mood variables. This model perfroms better than the mood model. It also perfroms better than chance for each subject, with the pooled effect being significant. 
 
 #### Model{-}
 ```{r}
 # Then with the full model
-vars.forest.x <-  c("mood_positive_c", "mood_negative_c", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "temp_mean")
-forest.lobo.full <- rf.lobo(Data=EMA_Data,
-                              SubNr="castor_record_id",
-                              xvars=vars.forest.x,
-                              yvar="Week_Type",
-                              NoTree=5000)
+# vars.forest.x <-  c("mood_positive_c", "mood_negative_c", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "temp_mean")
+# forest.lobo.full <- rf.lobo(Data=EMA_Data,
+#                               SubNr="castor_record_id",
+#                               xvars=vars.forest.x,
+#                               yvar="Week_Type",
+#                               NoTree=5000)
 as.data.frame(forest.lobo.full$total$subject_errors)
 psych::describe(forest.lobo.full$total$subject_errors)
 
@@ -2200,14 +2126,12 @@ lobo.combi_null
 
 
 
-### Whats the best LOBO? {-}
+### Whats the best LOBO? {.tabset}
 
-Now that we've established all our models do better than the bootstrap version, we can also test the models against each other. We first check the lowest performers. 
+We now test the LOBO models against each other. We start with the highest error rates, and that is the mood and physiology models (models 1 and 2). We then test the mood against the combined LOBO model, Based on these results, we see that Model 3 > Model 1 > Model 2. 
 
-#### Mood vs Physio
-
+#### Mood vs Physio {-}
 We filter the data and have to do a couple of manipulations to do a paired t-test.We see that the mood does significantly better
-
 ```{r}
 
 rf.result.df1 <- as.data.frame(forest.lobo.physio$total$subject_errors)
@@ -2223,8 +2147,7 @@ tidy(t.test(x=rf.result.merge$physio, y=rf.result.merge$mood, paired=T))
 ```
 
 
-#### Combi vs Mood
-
+#### Combi vs Mood {-}
 Now I test the mood vs full model. It appears that the full model does a lot better than the one with mood only. So it is safe to say that Model 3 > Model 1 > Model 2
 ```{r}
 
@@ -2245,20 +2168,20 @@ tidy(t.test(x=rf.result.merge$full, y=rf.result.merge$mood, paired=T))
 
 ## LOSO
 
-Next up is the standard LOSO. The idea here is that we want to check if we can actually use the data of different participants to predict for a completetly new one. This will remove the enitre EMA data set of a single subject, run the model, then cross validate it with the subject that was left out. I can now run the function below, first with a vector only including the mood items, then the full model:
+In order to determine whether the models can be generalized beyond the individial, we use a standard Leave-One-Subject-Out approach. In this analysis, we remove an entire subjects data set from the training set. We train our models on the remaining data, and then test the classification errors on the subject that was left out. This process is repeated until every subject has been removed once, thus providing error rates for each subject. For each model, we present the estimated LOSO error rates, and the test against the previously estimated null distribution. 
 
-### Model 1: Mood {-}
+### Model 1: Mood {.tabset}
 
 #### Model{-}
 Our first model looks at the mood ratings predicting which week participants are in. I estimate the LOSO error rates below. The model here doesnt do as well as the model with the lobo. Lets try to use the LOBO null distribution to see if its above chance levels next.
 ```{r}
 # First with mood items
-vars.forest.mood <-  c("mood_positive", "mood_negative")
-forest.loso.mood <- rf.loso(Data=EMA_Data, 
-                       SubNr="castor_record_id", 
-                       xvars=vars.forest.mood,
-                       yvar="Week_Type",
-                       NoTree=5000)
+# vars.forest.mood <-  c("mood_positive", "mood_negative")
+# forest.loso.mood <- rf.loso(Data=EMA_Data, 
+#                        SubNr="castor_record_id", 
+#                        xvars=vars.forest.mood,
+#                        yvar="Week_Type",
+#                        NoTree=5000)
 as.data.frame(forest.loso.mood$error_rate)
 psych::describe(forest.loso.mood$error_rate*100, na.rm=T)
 
@@ -2274,18 +2197,18 @@ forest.loso_mood_null
 ```
 
 
-### Model 2: Physio {-}
+### Model 2: Physiology {.tabset}
 
 The second model is looking at the physio variables predicting week type. We see that it only achieves 47.83% success. We will test this now against the bootstrapped error rate.
 #### Model{-}
 ```{r}
 # Then with the full model
-vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
-forest.loso.physio <- rf.loso(Data=EMA_Data, 
-                       SubNr="castor_record_id", 
-                       xvars=vars.forest.physio,
-                       yvar="Week_Type",
-                       NoTree=5000)
+# vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+# forest.loso.physio <- rf.loso(Data=EMA_Data, 
+#                        SubNr="castor_record_id", 
+#                        xvars=vars.forest.physio,
+#                        yvar="Week_Type",
+#                        NoTree=5000)
 as.data.frame(forest.loso.physio$error_rate)
 psych::describe(forest.loso.physio$error_rate*100)
 ``` 
@@ -2297,17 +2220,18 @@ forest.loso_physio_null <- rf.null_test(forest.loso.physio, forest.boot.physio.m
 forest.loso_physio_null
 ```
 
-### Model 3: Full {-}
+### Model 3: Combined {.tabset}
 FInally, the third model looks at everything (i.e. both physio and mood). This has an error rate of 43% which still sucks. Lets test this next against the bootstrap error
+
 #### Model {-}
 ```{r}
 # Then with the full model
-vars.forest.x <-  c("mood_positive_c", "mood_negative_c",  "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
-forest.loso.full <- rf.loso(Data=EMA_Data, 
-                       SubNr="castor_record_id", 
-                       xvars=vars.forest.x,
-                       yvar="Week_Type",
-                       NoTree=5000)
+# vars.forest.x <-  c("mood_positive_c", "mood_negative_c",  "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+# forest.loso.full <- rf.loso(Data=EMA_Data, 
+#                        SubNr="castor_record_id", 
+#                        xvars=vars.forest.x,
+#                        yvar="Week_Type",
+#                        NoTree=5000)
 as.data.frame(forest.loso.full$error_rate)
 psych::describe(forest.loso.full$error_rate*100)
 
@@ -2337,7 +2261,10 @@ rf.loso.full$id <- rownames(rf.loso.full)
 
 rf.result.merge <- merge(rf.loso.mood, rf.loso.physio, by="id")
 rf.result.merge <- merge(rf.result.merge, rf.loso.full, by="id")
+```
 
+
+```{r}
 tidy(t.test(x=rf.result.merge$`forest.loso.mood$error_rate`, y=rf.result.merge$`forest.loso.physio$error_rate`, paired=T))
 tidy(t.test(x=rf.result.merge$`forest.loso.mood$error_rate`, y=rf.result.merge$`forest.loso.full$error_rate`, paired=T))
 tidy(t.test(x=rf.result.merge$`forest.loso.physio$error_rate`, y=rf.result.merge$`forest.loso.full$error_rate`, paired=T))
@@ -2394,7 +2321,7 @@ figure.loo <- ggplot(df_loo_sum, aes(x=Model, y=error, colour=Method, fill=Metho
           panel.background = element_rect(fill="transparent"),
         panel.grid.minor.y = element_line(colour="grey95"),
         panel.grid.major.y = element_line(colour = "grey95")); 
-#ggsave("figures/fig_RFModels.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw')
+ggsave("figures/fig_RFModels.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw')
 figure.loo
 ```
 
@@ -2404,7 +2331,7 @@ Now we want to see for each of the models, which one performs best. I first need
 ```{r}
 df_loo_wide <- pivot_wider(df_loo,id_cols = id, names_from=c(Method, Model), values_from=error)
 print(df_loo_wide)
-write_csv(df_loo_wide, file = "data/LOO_DF.csv")
+#write_csv(df_loo_wide, file = "data/LOO_DF.csv")
 ```
 
 
@@ -2480,6 +2407,11 @@ tidy(t.test(df_loo_wide$loso_full, df_loo_wide$boot_full , paired = T))
 
 tidy(t.test(df_loo_wide$lobo_full, df_loo_wide$loso_full , paired = T))
 
+```
+
+# System Info
+```{r}
+sessionInfo()
 ```
 
 
