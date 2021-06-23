@@ -8,5 +8,7 @@ Scripts contained here are used in the preprocessing of files derived from the E
     2. E4_Cleaner.py: This script loops through the subjects log files from the E4 sessions for each of the weeks (i.e., control week, and stress week). Multiple E4 sessions are recorded for each participant in each week. This script will bring these sessions together for each week into one TXT/CSV file, including the time stamps of each acquired sample. The script takes into account the sampling frequencies. The resulting file for each modality is a two-coloumn format with time stamps in one coloumn, and the recorded E4 signal at that time point. 
 
     3. E4_Features.py: This script will go through the cleaned file generated in step [1], on a subject by subject basis. It will load in the subjects E4 files from step [2]. Using the timestamps from the EMA file in a row-by-row basis, the script windows a 10 minute period before the survey for each survey, and extracts corresponding physiology features in that period of time. The resulting file can be used for statistical analysis (see stats directory). 
+    
+    4. E4_Plots.py: Plots the results of the merged E4 data from the E4_Cleaner.py script for visualization. 
 	
 N.B.: Paths in scripts need to be adjusted according to where you run the code from! 
