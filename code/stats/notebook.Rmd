@@ -25,7 +25,7 @@ editor_options:
 
 # Introduction
 
-This analysis notebook accompanies the paper **Using wearable biosensors and ecological momentary assessments for the detection of prolonged stress in real life** by Tutunji et al. 2021, and utilizes data from the study "Stress Reslience and the Brain in Medical Students (STRAIN-MD)". Study design details can be founed in the [original article](paste link after publication), but a brief summary is provided here to assist in reading comprehension. In this study, participants completed two weeks of Ecological Momentary Asessments (EMA/ESM) coupled with Ecological Physiological Assessments (EPA). One of these weeks culminated in a high-stakes exam, while the other was outside of examination periods thus providing a stress and control week respectively. EMA consisted of questions regarding subjective stress, and positive and negative affect. EPA within the context of this study consisted of a [wearable device](https://www.empatica.com/research/e4/) that collected continuous measures of physiological arousal. Using these measures, we first validate our stress exposure by examining changes in subjective stress ratings between the two week. We then demonstrate the impact of stress exposure on mood and arousal measures. We then explore our findings by looking at continuous associations between subjective stress and outcomes. Finally, we demonstrate the feasibility of Mood and EPA measures in prediction of stress and control weeks using machine learning models. 
+This analysis notebook accompanies the paper **Using wearable biosensors and ecological momentary assessments for the detection of prolonged stress in real life** by Tutunji et al. 2021, and utilizes data from the study "Stress Reslience and the Brain in Medical Students (STRAIN-MD)". Study design details can be founed in the [original article](https://www.biorxiv.org/content/10.1101/2021.06.29.450360v1), but a brief summary is provided here to assist in reading comprehension. In this study, participants completed two weeks of Ecological Momentary Asessments (EMA/ESM) coupled with Ecological Physiological Assessments (EPA). One of these weeks culminated in a high-stakes exam, while the other was outside of examination periods thus providing a stress and control week respectively. EMA consisted of questions regarding subjective stress, and positive and negative affect. EPA within the context of this study consisted of a [wearable device](https://www.empatica.com/research/e4/) that collected continuous measures of physiological arousal. Using these measures, we first validate our stress exposure by examining changes in subjective stress ratings between the two week. We then demonstrate the impact of stress exposure on mood and arousal measures. We then explore our findings by looking at continuous associations between subjective stress and outcomes. Finally, we demonstrate the feasibility of Mood and EPA measures in prediction of stress and control weeks using machine learning models. 
 
 All custom functions and code can be found in [associated GitHub directory](https://github.com/raytut/DetectingStress/tree/main/code). Libraries used listed at the end of the document. In addition to the libraries, we also used prespecified themes for ggplots that make some plots easier to draw. These are all run in the set-up chunks. 
 
@@ -101,7 +101,7 @@ ggtheme <- theme (text=element_text(size=16,  family="Cambria"),
                   panel.grid.minor.y = element_line(size=3),
                   panel.grid.major = element_line(colour = "aliceblue") )
 # Theme 2
-ptheme <- theme(text=element_text(size=11,  family="Calibri"), 
+ptheme <- theme(text=element_text(size=11), 
           axis.line = element_line(size = 1, colour = "grey"),
           panel.background = element_rect(fill="transparent"),
     plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
@@ -860,8 +860,8 @@ plot.mood_week <- plot_models(glmer.event_week, glmer.activity_week, glmer.socia
                                       panel.grid.minor.x = element_line(colour = "grey90")) 
 
 # Show and save
-plot.mood_week+ coord_flip(ylim=c(-0.65,0.65)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90"))
-ggsave("figures/fig_WeekResid_SubjectiveStress.tiff",units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+plot.mood_week+ coord_flip(ylim=c(-0.65,0.65)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90")) 
+ggsave("figures/fig_1A_SubjectiveStress_Week.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 ```
 
 
@@ -1158,7 +1158,7 @@ plot.all_week_resid <- plot_models( glmer.posmood_week, glmer.negmood_week,
 
 # Plot and save
 plot.all_week_resid + coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90"))
-ggsave("figures/fig_WeekResid_ALL.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+ggsave("figures/fig_1B_Outcomes.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 ```
 
 
@@ -1450,7 +1450,7 @@ plot.event_substr <- plot_models(glmer.posmood_beep, glmer.negmood_beep,
                   panel.grid.major.x = element_line(colour = "grey95"),
                   panel.grid.minor.x = element_line(colour = "grey90")) 
 plot.event_substr <- plot.event_substr+ coord_flip(ylim=c(0.75,1.25)) +  coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
-ggsave("figures/fig_StrResid_Event.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+ggsave("figures/fig_2A_Event.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 
 # Act Plot
 plot.activity_substr <-  plot_models(glmer.posmood_beep, glmer.negmood_beep, 
@@ -1480,8 +1480,7 @@ plot.activity_substr <-  plot_models(glmer.posmood_beep, glmer.negmood_beep,
                   panel.grid.major.x = element_line(colour = "grey95"),
                   panel.grid.minor.x = element_line(colour = "grey90")) 
 plot.activity_substr <- plot.activity_substr+ coord_flip(ylim=c(0.75,1.25)) +  coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
-ggsave("figures/fig_StrResid_Activity.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
-
+ggsave("figures/fig_2B_Activity.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 
 # Social Stress
 plot.social_substr <-  plot_models(glmer.posmood_beep, glmer.negmood_beep, 
@@ -1512,7 +1511,7 @@ plot.social_substr <-  plot_models(glmer.posmood_beep, glmer.negmood_beep,
                   panel.grid.minor.x = element_line(colour = "grey90")) 
 ## Plot
 plot.social_substr <- plot.social_substr + coord_flip(ylim=c(0.75,1.25)) +  coord_flip(ylim=c(-0.5,0.5)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
-ggsave("figures/fig_StrResid_Social.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
+ggsave("figures/fig_2C_Social.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 
 # Physical Stress
 plot.physical_substr <- plot_models(glmer.posmood_beep, glmer.negmood_beep, 
@@ -1543,11 +1542,10 @@ plot.physical_substr <- plot_models(glmer.posmood_beep, glmer.negmood_beep,
                   panel.grid.minor.x = element_line(colour = "grey90")) 
 # Plot
 plot.physical_substr <- plot.physical_substr +  coord_flip(ylim=c(-0.5,0.5), xlim=c(1,1.1)) + theme(panel.grid.major.y = element_blank(), panel.grid.minor.y = element_blank())
-ggsave("figures/fig_StrResid_Physical.tiff", units="in", width=4, height=4, dpi=300, compression = 'lzw', bg="transparent")
-
+ggsave("figures/fig_2C_Physical.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 # All
 ggarrange(plot.event_substr, plot.activity_substr, plot.social_substr, plot.physical_substr, common.legend = T, legend="right")
-ggsave("figures/fig_StrResid_MAT.tiff", units="in", width=7, height=7, dpi=300, compression = 'lzw', bg="transparent")
+ggsave("figures/fig_2_All.svg", device="svg", units="in", width=7, height=7, dpi=320, bg="transparent")
 ```
 
 ## Mood and Physiology
@@ -1753,7 +1751,7 @@ plot.pos_mood_resid <- plot_models( glmer.sc_ton_mood, glmer.sc_phnum_mood, glme
                   panel.grid.minor.x = element_line(colour = "grey90")) 
 # Plot and Save
 plot.pos_mood_resid + coord_flip(ylim=c(-.25,.25)) + theme(panel.grid.major.y = element_line(colour = "grey95"), panel.grid.minor.y = element_line(colour = "grey90"))
-ggsave("figures/fig_MoodkResid_ALL.tiff", units="in", width=5, height=5, dpi=300, compression = 'lzw', bg="transparent")
+ggsave("figures/fig_MoodkResid_ALL.svg", device="svg", units="in", width=4, height=4, dpi=320, bg="transparent")
 ```
 
 
@@ -1777,19 +1775,19 @@ Two arousal measures were reduced in the stress week, but also associated with i
 First we check whether positive mood mediates the effects of week type of the number of responses. We see in the control week, there is a trend with positive affect mediating  the number of skin conductace responses. 
 ```{r}
 # Main effe
-fit.totaleffect=glmer(sc_phasic_num_s ~ Week_Type + (1|castor_record_id), EMA_Sub)
-#summary(fit.totaleffect)
-
-# Mediations
-fit.mediator=glmer(mood_positive_s ~ Week_Type + (1|castor_record_id), EMA_Sub)
-#summary(fit.mediator)
-
-# Combined
-fit.dv=glmer(sc_phasic_num_s ~ Week_Type*mood_positive_s + (1|castor_record_id), EMA_Sub)
-#summary(fit.dv)
-
-# Mediation analysis
-results1 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='Week_Type', mediator='mood_positive_s', sims=5000, control.value="Control", treat.value="Stress")
+# fit.totaleffect=glmer(sc_phasic_num_s ~ Week_Type + (1|castor_record_id), EMA_Sub)
+# #summary(fit.totaleffect)
+# 
+# # Mediations
+# fit.mediator=glmer(mood_positive_s ~ Week_Type + (1|castor_record_id), EMA_Sub)
+# #summary(fit.mediator)
+# 
+# # Combined
+# fit.dv=glmer(sc_phasic_num_s ~ Week_Type*mood_positive_s + (1|castor_record_id), EMA_Sub)
+# #summary(fit.dv)
+# 
+# # Mediation analysis
+# results1 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='Week_Type', mediator='mood_positive_s', sims=5000, control.value="Control", treat.value="Stress")
 summary(results1)
 
 ```
@@ -1798,18 +1796,18 @@ summary(results1)
 We next check the mediating effect of positive affect on skin coductance magnitde. Here we see that the magnitude of the responses is significanlty mediated by positive affect. It seems in both cases, these effects are being driven by the control week.
 ```{r}
 # Main effect
-fit.totaleffect=glmer(sc_phasic_mag_s ~ Week_Type  + (1|castor_record_id), EMA_Sub)
-summ(fit.totaleffect)
-
-# Mediations
-fit.mediator=glmer(mood_positive_s ~ Week_Type  +  (1|castor_record_id), EMA_Sub)
-summ(fit.mediator)
-
-# Combined
-fit.dv=glmer(sc_phasic_mag_s ~ Week_Type*mood_positive_s + (1|castor_record_id), EMA_Sub)
-summ(fit.dv)
-
-# Mediation analysis
+# fit.totaleffect=glmer(sc_phasic_mag_s ~ Week_Type  + (1|castor_record_id), EMA_Sub)
+# summ(fit.totaleffect)
+# 
+# # Mediations
+# fit.mediator=glmer(mood_positive_s ~ Week_Type  +  (1|castor_record_id), EMA_Sub)
+# summ(fit.mediator)
+# 
+# # Combined
+# fit.dv=glmer(sc_phasic_mag_s ~ Week_Type*mood_positive_s + (1|castor_record_id), EMA_Sub)
+# summ(fit.dv)
+# 
+# # Mediation analysis
 results2 = mediate(model.m=fit.mediator, model.y=fit.dv, treat='Week_Type', mediator='mood_positive_s', boot=F, sims=5000)
 summary(results2)
 
@@ -1881,41 +1879,21 @@ forest.important
 ```
 
 
-## LOBO
+## Model Estimations
 
-In order to perform the validation, we try out a leave-one-beep-out (LOBO) analysis. This analysis will run a random forest model for each subject separately, leaving out one survey when running the model. We then test the model on the beep that was left out. We repeat this process for the subject until we've removed each survey/beep out once. This results in a series of predictions that give us an error level for each subject. In order to do this, we have developed a function that is provided in this github directory mentioned in the introducton. This will produce the classification errors for each subject.
+In order to perform cross-validation, we try out two methods: leave-one-beep-out (LOBO), and leave-one-subject-out (LOSO) analysis. For the LOBO, we train a random forest model for each subject separately (so 81 subjects=81 models), where we leave out one survey (or beep) when running the model. We then test the model on the beep that was left out. We repeat this process for the subject until we've removed each survey/beep out once. This results in a series of predictions that give us an error level for each subject. In order to do this, we have developed a function that is provided in this github directory mentioned in the introducton. This will produce the classification errors for each subject. 
 
-We also need to test all our models against the  true chance levels. One can assume in theory that the prediction error for a dichotomous variable is 50/50, but we dont like to do things the easy way. Instead, we will do 10000 iterations where we bootstrap resample the stress and control weeks. This will give us the real error rate with a sampling distribution. This was made into a function, but for some reason I couldnt get the function to run in parallel processing on our unix system. So instead I run the parallel processing of the bootstrap outside of a function. Its not pretty, but it works. 
+We additionally want to test the generalizability of the models. If we get all this data, can we use it on a novel participant? So to this end, we use the LOSO model where we remove a participants' entire data set, train our model on the remaining data, and then test it on the subject that was left out. This gives us a confusion matrix from which we calculate the error rates for these models.
 
-We also test the LOBO model using against the bootstrapped LOBO model. We also made a function to do this. The function estimates the p-value by comparing it to the permuation test distribution. The function also has the option to estimate the p-value from an assumed normal distribution, but we simply use the actual distribution for this. We additionally compute a combined p-value with this function using Stoufferś method and the poolr package. 
+Finally, we also need to test all our models against the  true chance levels. One can assume in theory that the prediction error for a dichotomous variable is 50/50, but we dont like to do things the easy way. Instead, we will do 10000 iterations where we bootstrap resample the stress and control weeks. This will give us the real error rate with a sampling distribution. This was made into a function, but for some reason I couldnt get the function to run in parallel processing on our unix system. So instead I run the parallel processing of the bootstrap outside of a function. Its not pretty, but it works.
 
-This results in the three tabs for each model:
-
-1. **Model:** Contains the actual results of the LOBO model
-2. **Bootstrap:** Contains the bootstrap error estimation results
-3. **Stouffer's tests:** Contains the tests against the null distribution and the pooled p-values
 
 ### Model 1: Mood {.tabset}
-Some parts of the code are commented to make producing the notebook easier, we see that the mean LOBO error rate is 33.45 percent, and that the model performs relatively well on most subjects. Based on the estimated bootstrap error distribution of around 50%, we also show that this model performs above chance. 
 
-#### Model {-}
-```{r}
-# Then with the full model
-vars.forest.mood <-  c("mood_positive_c", "mood_negative_c")
-# forest.lobo.mood <- rf.lobo(Data=EMA_Data,
-#                               SubNr="castor_record_id",
-#                            xvars=vars.forest.mood,
-#                               yvar="Week_Type",
-#                               NoTree=5000)
-as.data.frame(forest.lobo.mood$total$subject_errors)
-psych::describe(forest.lobo.mood$total$subject_errors)
+Here we estimate our models based on mood only. Using mood, we try to classify which week participants were in. First we run the bootstrap, and then the LOSO and LOBO models. We see that the mean LOBO error rate is 33.76 percent, and that the model performs relatively well on most subjects. The LOSO model does considerably worse with around 45% error rates. Our bootstrap shows that its not exactly 50% chance, but it is close enough at least. We will still use the boot strap analysis later
 
-```
-
-
-
-#### Bootstrap{-}
-```{r warning=FALSE}
+#### Bootstrap Model {-}
+```{r message=FALSE, warning=FALSE}
 # BootstrapLOBO.
 # { cl <- makeCluster(NoCores-1)
 # registerDoSNOW(cl)
@@ -1949,9 +1927,7 @@ psych::describe(forest.lobo.mood$total$subject_errors)
 # }
 ``` 
 
-
-Now that we have run the bootstrap, we also save it just in case, and then we get the average error, and calcualte the true SD and SE from the sampling distribution. 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # Print the Errors
 boot.mood.descr <- psych::describe(forest.boot.mood.merge$averageError)
 # Also get the true SD of bootstraps
@@ -1961,39 +1937,54 @@ boot.mood.descr
 
 ```
 
- 
-#### Stouffer's Test{-}
+#### LOBO Model {-}
 
-```{r}
+```{r message=FALSE, warning=FALSE}
+# Then with the full model
+vars.forest.mood <-  c("mood_positive_c", "mood_negative_c")
+# forest.lobo.mood <- rf.lobo(Data=EMA_Data,
+#                               SubNr="castor_record_id",
+#                            xvars=vars.forest.mood,
+#                               yvar="Week_Type",
+#                               NoTree=5000)
+as.data.frame(forest.lobo.mood$total$subject_errors)
+psych::describe(forest.lobo.mood$total$subject_errors)
 
-lobo.mood_null <- rf.null_test(forest.lobo.mood, forest.boot.mood.merge, model_type="LOBO", method="actual")
-lobo.mood_null
 ```
+*Subject Level P-Values*
+```{r}
+lobo.mood_null <- rf.null_test(forest.lobo.mood, forest.boot.mood.merge, model_type="LOBO", method="actual")
+lobo.mood_null$p_val
+```
+
+#### LOSO Model{-}
+```{r}
+# First with mood items
+# vars.forest.mood <-  c("mood_positive", "mood_negative")
+# forest.loso.mood <- rf.loso(Data=EMA_Data, 
+#                        SubNr="castor_record_id", 
+#                        xvars=vars.forest.mood,
+#                        yvar="Week_Type",
+#                        NoTree=5000)
+as.data.frame(forest.loso.mood$error_rate)
+psych::describe(forest.loso.mood$error_rate*100, na.rm=T)
+```
+Subject level p-values
+```{r}
+loso.mood_null <- rf.null_test(forest.loso.mood, forest.boot.mood.merge, model_type="LOSO", method="actual")
+loso.mood_null$p_val
+```
+
+
 
 
 
 ### Model 2: Physiology {.tabset}
 
-The second model I will test is whether we can predict week type from the physiology data alone. For this model, the LOBO error rate is 36.11, which is still better than chance level predictions, but worse than model 1.
+The second model I will test is whether we can predict week type from the physiology data alone. For this model, the LOBO error rate is 36.11, which is still better than chance level predictions, but worse than model 1.The LOSO errors here are also pretty high. We will later test them empirically
 
-#### Model {-}
-
-```{r}
-# Then with the full model
-# vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
-# forest.lobo.physio <- rf.lobo(Data=EMA_Data,
-#                               SubNr="castor_record_id",
-#                               xvars=vars.forest.physio,
-#                               yvar="Week_Type",
-#                               NoTree=5000)
-as.data.frame(forest.lobo.physio$total$subject_errors)
-psych::describe(forest.lobo.physio$total$subject_errors)
-
-```
-
-#### Bootstrap{-}
-We again do the bootstrap model, and then save it as an object for later use. 
-```{r}
+#### Bootstrap Model {-}
+```{r message=FALSE, warning=FALSE}
 # # LOBO Bootstrapping
 # { cl <- makeCluster(NoCores-1)
 #     registerDoSNOW(cl)
@@ -2029,8 +2020,7 @@ We again do the bootstrap model, and then save it as an object for later use.
 # }
 ```
 
-We now calculate the bootstrap SE and SD
-```{r}
+```{r message=FALSE, warning=FALSE}
 # Print the Errors
 boot.physio.descr <- psych::describe(forest.boot.physio.merge$averageError)
 # Also get the true SD of bootstraps
@@ -2039,38 +2029,50 @@ boot.physio.descr$se <- mean((psych::describe(forest.boot.physio.merge))$se, na.
 boot.physio.descr
 ```
 
-#### Stouffer's Test{-}
+#### LOBO Model {-}
+```{r message=FALSE, warning=FALSE}
+# Then with the full model
+# vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+# forest.lobo.physio <- rf.lobo(Data=EMA_Data,
+#                               SubNr="castor_record_id",
+#                               xvars=vars.forest.physio,
+#                               yvar="Week_Type",
+#                               NoTree=5000)
+as.data.frame(forest.lobo.physio$total$subject_errors)
+psych::describe(forest.lobo.physio$total$subject_errors)
 
-So now that I have the averaged bootstrap error for the physio model, lets check if the LOBO is more than random with a test against the bootstrap estimates. 
-```{r}
-lobo.physio_null <- rf.null_test(forest.lobo.physio, forest.boot.physio.merge,  model_type="LOBO", method="actual")
-lobo.physio_null
+```
+*Subject level p-values:*
+```{r message=FALSE, warning=FALSE}
+lobo.physio_null <- rf.null_test(forest.lobo.physio, forest.boot.physio.merge, model_type="LOBO", method="actual")
+lobo.physio_null$p_val
+```
+#### LOSO Model{-}
+```{r message=FALSE, warning=FALSE}
+# Then with the full model
+# vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+# forest.loso.physio <- rf.loso(Data=EMA_Data, 
+#                        SubNr="castor_record_id", 
+#                        xvars=vars.forest.physio,
+#                        yvar="Week_Type",
+#                        NoTree=5000)
+as.data.frame(forest.loso.physio$error_rate)
+psych::describe(forest.loso.physio$error_rate*100)
+``` 
+*Subject level p-values:*
+```{r message=FALSE, warning=FALSE}
+loso.physio_null <- rf.null_test(forest.loso.physio, forest.boot.physio.merge, model_type="LOSO", method="actual")
+loso.physio_null$p_val
 ```
 
-According to the t-test against the bootstrap error sample, the test is above chance level here too. I will again do a model comparison at the end of the model-testing sections.
+
 
 ### Model 3: Combined {.tabset}
 
-Finally we check the full model using both physio and mood variables. This model perfroms better than the mood model. It also perfroms better than chance for each subject, with the pooled effect being significant. 
+Finally we check the full model using both physio and mood variables. This model perfroms better than the mood model. It also perfroms better than chance for each subject.
 
-#### Model{-}
-```{r}
-# Then with the full model
-# vars.forest.x <-  c("mood_positive_c", "mood_negative_c", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "temp_mean")
-# forest.lobo.full <- rf.lobo(Data=EMA_Data,
-#                               SubNr="castor_record_id",
-#                               xvars=vars.forest.x,
-#                               yvar="Week_Type",
-#                               NoTree=5000)
-as.data.frame(forest.lobo.full$total$subject_errors)
-psych::describe(forest.lobo.full$total$subject_errors)
-
-``` 
-
-
-#### Bootstrap{-}
-Then I can check the bootstrap error for the model combined model as done before:
-```{r}
+#### Bootstrap Model {-}
+```{r message=FALSE, warning=FALSE}
 # {cl <- makeCluster(NoCores-1)
 # registerDoSNOW(cl)
 # iterations <- 10000
@@ -2105,8 +2107,7 @@ Then I can check the bootstrap error for the model combined model as done before
 # }
 ```
 
-We then again calculate the SE and SD of the models
-```{r}
+```{r message=FALSE, warning=FALSE}
 # Print the Errors
 boot.combi.descr <- psych::describe(forest.boot.combi.merge$averageError)
 # Also get the true SD of bootstraps
@@ -2116,23 +2117,55 @@ boot.combi.descr
 
 ```
 
-#### Stouffer's Test{-}
-And finally I can test the difference between the full model and the bootstrapped one. So we can see again, that our model only improves slightly with the addition of the physio variables (1%). That doesnt seem great. But we can also guess that within the control week there may be times when people are stressed, and vice versa for the stress week.We will do the null test again.
+#### LOBO Model{-}
+```{r message=FALSE, warning=FALSE}
+# Then with the full model
+# vars.forest.x <-  c("mood_positive_c", "mood_negative_c", "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "temp_mean")
+# forest.lobo.full <- rf.lobo(Data=EMA_Data,
+#                               SubNr="castor_record_id",
+#                               xvars=vars.forest.x,
+#                               yvar="Week_Type",
+#                               NoTree=5000)
+as.data.frame(forest.lobo.full$total$subject_errors)
+psych::describe(forest.lobo.full$total$subject_errors)
 
+``` 
+
+*Subject level p-values:*
+```{r message=FALSE, warning=FALSE}
+lobo.full_null <- rf.null_test(forest.lobo.full, forest.boot.combi.merge, model_type="LOBO", method="actual")
+lobo.full_null$p_val
+```
+#### LOSO Model {-}
+```{r message=FALSE, warning=FALSE}
+# Then with the full model
+# vars.forest.x <-  c("mood_positive_c", "mood_negative_c",  "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
+# forest.loso.full <- rf.loso(Data=EMA_Data, 
+#                        SubNr="castor_record_id", 
+#                        xvars=vars.forest.x,
+#                        yvar="Week_Type",
+#                        NoTree=5000)
+as.data.frame(forest.loso.full$error_rate)
+psych::describe(forest.loso.full$error_rate*100)
+
+``` 
+*Subject level p-values:*
 ```{r}
-lobo.combi_null <- rf.null_test(forest.lobo.full, forest.boot.combi.merge, model_type="LOBO", method="actual")
-lobo.combi_null
+loso.full_null <- rf.null_test(forest.loso.full, forest.boot.combi.merge, model_type="LOSO", method="actual")
+loso.full_null$p_val
 ```
 
 
+### Within Model Testing
 
-### Whats the best LOBO? {.tabset}
+Now that all models have been estimated, we will first test the within-model differences in the error rates. This means that for both the LOBO and the LOSO, we test models 1, 2, and 3 against each other. 
 
-We now test the LOBO models against each other. We start with the highest error rates, and that is the mood and physiology models (models 1 and 2). We then test the mood against the combined LOBO model, Based on these results, we see that Model 3 > Model 1 > Model 2. 
+#### LOBO Models {.tabset}
 
-#### Mood vs Physio {-}
-We filter the data and have to do a couple of manipulations to do a paired t-test.We see that the mood does significantly better
-```{r}
+We start with the highest error rates, and that is the mood and physiology models (models 1 and 2). We then test the mood against the combined LOBO model, Based on these results, we see that Model 3 > Model 1 > Model 2. So the combination of both the mood and physiology data is the best in these types of models
+
+##### Mood vs Physiology {-}
+```{r message=FALSE, warning=FALSE}
 
 rf.result.df1 <- as.data.frame(forest.lobo.physio$total$subject_errors)
 colnames(rf.result.df1)[1] <- "physio"
@@ -2146,9 +2179,22 @@ rf.result.merge <- merge(rf.result.df1, rf.result.df2, by="id")
 tidy(t.test(x=rf.result.merge$physio, y=rf.result.merge$mood, paired=T))
 ```
 
+##### Mood vs Full {-}
+```{r}
 
-#### Combi vs Mood {-}
-Now I test the mood vs full model. It appears that the full model does a lot better than the one with mood only. So it is safe to say that Model 3 > Model 1 > Model 2
+rf.result.df1 <- as.data.frame(forest.lobo.full$total$subject_errors)
+colnames(rf.result.df1)[1] <- "full"
+rf.result.df1$id <- rownames(rf.result.df1)
+
+rf.result.df2 <- as.data.frame(forest.lobo.mood$total$subject_errors)
+colnames(rf.result.df2)[1] <- "mood"
+rf.result.df2$id <- rownames(rf.result.df2)
+
+rf.result.merge <- merge(rf.result.df1, rf.result.df2, by="id")
+tidy(t.test(x=rf.result.merge$full, y=rf.result.merge$mood, paired=T))
+```
+
+##### Physiology vs Full {-}
 ```{r}
 
 rf.result.df1 <- as.data.frame(forest.lobo.full$total$subject_errors)
@@ -2164,91 +2210,8 @@ tidy(t.test(x=rf.result.merge$full, y=rf.result.merge$mood, paired=T))
 ```
 
 
-
-
-## LOSO
-
-In order to determine whether the models can be generalized beyond the individial, we use a standard Leave-One-Subject-Out approach. In this analysis, we remove an entire subjects data set from the training set. We train our models on the remaining data, and then test the classification errors on the subject that was left out. This process is repeated until every subject has been removed once, thus providing error rates for each subject. For each model, we present the estimated LOSO error rates, and the test against the previously estimated null distribution. 
-
-### Model 1: Mood {.tabset}
-
-#### Model{-}
-Our first model looks at the mood ratings predicting which week participants are in. I estimate the LOSO error rates below. The model here doesnt do as well as the model with the lobo. Lets try to use the LOBO null distribution to see if its above chance levels next.
-```{r}
-# First with mood items
-# vars.forest.mood <-  c("mood_positive", "mood_negative")
-# forest.loso.mood <- rf.loso(Data=EMA_Data, 
-#                        SubNr="castor_record_id", 
-#                        xvars=vars.forest.mood,
-#                        yvar="Week_Type",
-#                        NoTree=5000)
-as.data.frame(forest.loso.mood$error_rate)
-psych::describe(forest.loso.mood$error_rate*100, na.rm=T)
-
-```
-
-#### Test {-}
-Here I will try to check the LOSO model vs. the null distribution estimated from the bootstrap we did earler. The loso model did not perform better than the bootstrapped estimates.
-```{r}
-
-forest.loso_mood_null <- rf.null_test(forest.loso.mood, forest.boot.mood.merge,  model_type="LOSO", method="actual")
-forest.loso_mood_null
-
-```
-
-
-### Model 2: Physiology {.tabset}
-
-The second model is looking at the physio variables predicting week type. We see that it only achieves 47.83% success. We will test this now against the bootstrapped error rate.
-#### Model{-}
-```{r}
-# Then with the full model
-# vars.forest.physio <-  c("sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
-# forest.loso.physio <- rf.loso(Data=EMA_Data, 
-#                        SubNr="castor_record_id", 
-#                        xvars=vars.forest.physio,
-#                        yvar="Week_Type",
-#                        NoTree=5000)
-as.data.frame(forest.loso.physio$error_rate)
-psych::describe(forest.loso.physio$error_rate*100)
-``` 
-
-#### Test{-}
-Next we check the physio variables against the null distribution. Here we see that it its also not signficantly better than chance.
-```{r}
-forest.loso_physio_null <- rf.null_test(forest.loso.physio, forest.boot.physio.merge, model_type="LOSO", method="actual")
-forest.loso_physio_null
-```
-
-### Model 3: Combined {.tabset}
-FInally, the third model looks at everything (i.e. both physio and mood). This has an error rate of 43% which still sucks. Lets test this next against the bootstrap error
-
-#### Model {-}
-```{r}
-# Then with the full model
-# vars.forest.x <-  c("mood_positive_c", "mood_negative_c",  "sc_tonic_mean", "sc_phasic_mag", "sc_phasic_dur", "sc_phasic_auc", "sc_phasic_num","hr_mean", "hr_max", "hr_min", "hr_sd", "acc_delta", "temp_mean")
-# forest.loso.full <- rf.loso(Data=EMA_Data, 
-#                        SubNr="castor_record_id", 
-#                        xvars=vars.forest.x,
-#                        yvar="Week_Type",
-#                        NoTree=5000)
-as.data.frame(forest.loso.full$error_rate)
-psych::describe(forest.loso.full$error_rate*100)
-
-``` 
-#### Test {-}
-Finally we test the model with both against the null distribution.This one is also not significantly better than chance.  
-```{r}
-forest.loso_full_null <- rf.null_test(forest.loso.full, forest.boot.combi.merge, model_type="LOSO", method="actual")
-forest.loso_full_null
-
-```
-
-Based on all three tests for the models against the null we can conclude that the LOSO models do not in fact perform better than chance. 
-
-### Whats the best LOSO? {-}
-
-Based on the error rate, lets see if one model does a better job than the other:
+#### LOSO Model {.tabset}
+We now do this again for the LOSO models, where we compare the LOSO models 1, 2, and 3 to each other. We againn see the same pattern, with the model using the comined values have the highest accuracy. 
 ```{r}
 rf.loso.mood <- as.data.frame(forest.loso.mood$error_rate)
 rf.loso.mood$id <- rownames(rf.loso.mood)
@@ -2263,14 +2226,19 @@ rf.result.merge <- merge(rf.loso.mood, rf.loso.physio, by="id")
 rf.result.merge <- merge(rf.result.merge, rf.loso.full, by="id")
 ```
 
-
+##### Mood vs Physiology {-}
 ```{r}
 tidy(t.test(x=rf.result.merge$`forest.loso.mood$error_rate`, y=rf.result.merge$`forest.loso.physio$error_rate`, paired=T))
+
+```
+##### Mood vs Full {-}
+```{r}
 tidy(t.test(x=rf.result.merge$`forest.loso.mood$error_rate`, y=rf.result.merge$`forest.loso.full$error_rate`, paired=T))
+```
+##### Physiology vs Full {-}
+```{r}
 tidy(t.test(x=rf.result.merge$`forest.loso.physio$error_rate`, y=rf.result.merge$`forest.loso.full$error_rate`, paired=T))
 ```
-
-It looks like there is no significant difference between the error rates in the paired sample t-test in these three models. What could this mean? That regardless of what model we use at a population level, we still are not able to make decent predictions. I think that these models arent good at population level predictions, and this is pretty obnvious if we look at the within-subject variance from our linear models. Most of the variance comes from between subjects. Another approach is warranted.
 
 
 ## Plot of Models
@@ -2294,8 +2262,6 @@ df_loo <- gather(rf.combined.errors,model, error, loso.mood:lobo.full, factor_ke
 df_loo <- full_join(df_loo, df_boot)
 # Separate coloumns for plotting
 df_loo <- separate(df_loo, model, into=c("Method", "Model"))
-
-
 
 df_loo_sum <- data_summary(df_loo, "error", c("Method", "Model"))
 # Set the SD and SE of bootstrap models to the correct ones of whole model
@@ -2325,9 +2291,9 @@ ggsave("figures/fig_RFModels.tiff", units="in", width=4, height=4, dpi=300, comp
 figure.loo
 ```
 
-## Testing All Models
+## Between Method Tests
 
-Now we want to see for each of the models, which one performs best. I first need to split the long dataframe I made for the figures into a wide format.
+We will now do a between method test. We will compare the LOBO, LOSO, and the bootstraped estimates against each other. First we combine the model results togehter into a signle dataframe below to make it easier. 
 ```{r}
 df_loo_wide <- pivot_wider(df_loo,id_cols = id, names_from=c(Method, Model), values_from=error)
 print(df_loo_wide)
@@ -2336,6 +2302,8 @@ print(df_loo_wide)
 
 
 ### Model 1: Mood {.tabset}
+
+First, we test whether the mood models perfrom better than the bootstrap counterpart, and then test them empirically against each other. 
 
 #### LOBO vs Boot {-}
 ```{r}
@@ -2354,6 +2322,12 @@ tidy(t.test(df_loo_wide$loso_mood, df_loo_wide$boot_mood , paired = T))
 ```{r}
 
 tidy(t.test(df_loo_wide$lobo_mood, df_loo_wide$loso_mood , paired = T))
+```
+
+#### Effect Sizes {-}
+```{r}
+df_loo.m1 <- df_loo %>% filter(Model=="mood") %>% na.omit()
+rstatix::cohens_d(data=df_loo.m1, error ~ Method, hedges.correction = TRUE)
 ```
 
 
@@ -2383,6 +2357,11 @@ tidy(t.test(df_loo_wide$lobo_physio, df_loo_wide$loso_physio , paired = T))
 ```
 
 
+#### Effect Sizes {-}
+```{r}
+df_loo.m2 <- df_loo %>% filter(Model=="physio") %>% na.omit()
+rstatix::cohens_d(data=df_loo.m2, error ~ Method, hedges.correction = TRUE)
+```
 
 ### Model 3: Full Model {.tabset}
 
@@ -2405,8 +2384,14 @@ tidy(t.test(df_loo_wide$loso_full, df_loo_wide$boot_full , paired = T))
 #### LOBO  vs LOSO {-}
 ```{r}
 
-tidy(t.test(df_loo_wide$lobo_full, df_loo_wide$loso_full , paired = T))
+tidy(t.test(df_loo_wide$lobo_full, df_loo_wide$loso_full, paired = T))
 
+```
+
+#### Effect Sizes {-}
+```{r}
+df_loo.m3 <- df_loo %>% filter(Model=="full") %>% na.omit()
+rstatix::cohens_d(data=df_loo.m2, error ~ Method, hedges.correction = TRUE)
 ```
 
 # System Info
