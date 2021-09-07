@@ -1,1 +1,2 @@
-https://raytut.github.io/DetectingStress/
+- Raw data is uploaded to our institutional repository and made available upon resaonable request due to potentitally sensitive information contained therein. 
+- Interactive Notebook: https://raytut.github.io/DetectingStress/
